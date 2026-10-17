@@ -18,7 +18,7 @@ type Pacote = {
 };
 type Lista = { id: string; data: string; quantidade: number; pacotes: Pacote[] };
 
-const usuarioKey = "baixa-entregas-usuario";
+const EMAIL_AUTORIZADO = "daniel.vuandoalto10@gmail.com";
 const agora = () => {
   const d = new Date();
   return { data: d.toISOString().slice(0, 10), hora: d.toTimeString().slice(0, 5) };
@@ -80,7 +80,7 @@ async function carregarListas(usuario: string): Promise<Lista[]> {
 }
 
 function Index() {
-  const [usuario, setUsuario] = useState<string | null>(() => localStorage.getItem(usuarioKey));
+  const [usuario, setUsuario] = useState<string | null>(null);
   const [listas, setListas] = useState<Lista[]>([]);
   const [listaId, setListaId] = useState<string | null>(null);
   const [pacote, setPacote] = useState<number | null>(null);
@@ -105,6 +105,43 @@ function Index() {
   const detalhe = lista?.pacotes.find((p) => p.numero === detalheId);
 
   useEffect(() => {
+    if (!supabase) return;
+    let ativo = true;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const email = session?.user.email?.toLowerCase() ?? null;
+      if (email && email !== EMAIL_AUTORIZADO) {
+        void supabase.auth.signOut();
+        if (ativo) {
+          setUsuario(null);
+          setErro("Este e-mail não tem autorização para acessar o aplicativo.");
+        }
+        return;
+      }
+      if (ativo) setUsuario(email);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_evento, session) => {
+      const email = session?.user.email?.toLowerCase() ?? null;
+      if (email && email !== EMAIL_AUTORIZADO) {
+        setUsuario(null);
+        setErro("Este e-mail não tem autorização para acessar o aplicativo.");
+        return;
+      }
+      setUsuario(email);
+      if (!email) {
+        setListas([]);
+        setListaId(null);
+      }
+    });
+
+    return () => {
+      ativo = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!usuario || !supabase) return;
     setCarregando(true);
     carregarListas(usuario)
@@ -116,16 +153,37 @@ function Index() {
       .finally(() => setCarregando(false));
   }, [usuario]);
 
-  const entrar = (u: string) => {
-    localStorage.setItem(usuarioKey, u);
-    setUsuario(u);
-    setListas([]);
-    setListaId(null);
+  const entrar = async (email: string, senha: string, modo: "entrar" | "criar") => {
+    if (!supabase) return setErro("O aplicativo ainda não está conectado ao Supabase.");
+    if (email.trim().toLowerCase() !== EMAIL_AUTORIZADO) {
+      return setErro("Somente o e-mail autorizado pode acessar este aplicativo.");
+    }
+    if (senha.length < 8) return setErro("A senha precisa ter pelo menos 8 caracteres.");
+
+    setSalvando(true);
     setErro("");
+    try {
+      if (modo === "criar") {
+        const { data, error } = await supabase.auth.signUp({ email: EMAIL_AUTORIZADO, password: senha });
+        if (error) throw error;
+        if (data.session) {
+          setUsuario(EMAIL_AUTORIZADO);
+        } else {
+          setErro("Cadastro iniciado. Confira seu e-mail para confirmar a conta e depois entre no aplicativo.");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: EMAIL_AUTORIZADO, password: senha });
+        if (error) throw error;
+      }
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível autenticar. Confira os dados e tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const sair = () => {
-    localStorage.removeItem(usuarioKey);
+  const sair = async () => {
+    if (supabase) await supabase.auth.signOut();
     setUsuario(null);
     setListas([]);
     setListaId(null);
@@ -298,7 +356,7 @@ function Index() {
     }
   };
 
-  if (!usuario) return <Login entrar={entrar} />;
+  if (!usuario) return <Login entrar={entrar} erro={erro} salvando={salvando} />;
 
   return <main className="min-h-screen bg-slate-950 text-white">
     <header className="border-b border-slate-800 bg-slate-900 px-4 py-4"><div className="mx-auto flex max-w-6xl justify-between"><div><h1 className="text-2xl font-bold">Baixa de Entregas</h1><p className="text-sm text-slate-400">Usuário: {usuario}</p></div><button onClick={sair} className="rounded-lg border border-slate-700 px-3 py-2">Sair</button></div></header>
@@ -316,6 +374,36 @@ function Index() {
   </main>;
 }
 
-function Login({ entrar }: { entrar: (u: string) => void }) {
-  return <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4"><section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8"><h1 className="mb-2 text-center text-3xl font-bold">Baixa de Entregas</h1><p className="mb-8 text-center text-slate-400">Escolha seu usuário.</p><div className="space-y-3">{["Rafael","Rangel"].map((u)=><button key={u} onClick={()=>entrar(u)} className="flex w-full items-center gap-4 rounded-xl border border-slate-700 bg-slate-800 p-4 text-left hover:border-emerald-500"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-700 font-bold">{u[0]}</span><strong>{u}</strong></button>)}</div></section></main>;
+function Login({
+  entrar,
+  erro,
+  salvando,
+}: {
+  entrar: (email: string, senha: string, modo: "entrar" | "criar") => void;
+  erro: string;
+  salvando: boolean;
+}) {
+  const [senha, setSenha] = useState("");
+  const [modo, setModo] = useState<"entrar" | "criar">("entrar");
+
+  return <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
+    <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8">
+      <h1 className="mb-2 text-center text-3xl font-bold">Baixa de Entregas</h1>
+      <p className="mb-6 text-center text-slate-400">Acesso protegido por e-mail e senha.</p>
+      {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
+      <label className="block text-sm text-slate-300">E-mail autorizado
+        <input value={EMAIL_AUTORIZADO} readOnly className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-slate-300" />
+      </label>
+      <label className="mt-4 block text-sm text-slate-300">Senha
+        <input type="password" autoComplete={modo === "criar" ? "new-password" : "current-password"} value={senha} onChange={e => setSenha(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" placeholder="Mínimo de 8 caracteres" />
+      </label>
+      <button disabled={salvando || senha.length < 8} onClick={() => entrar(EMAIL_AUTORIZADO, senha, modo)} className="mt-5 w-full rounded-xl bg-emerald-600 px-5 py-3 font-bold disabled:opacity-50">
+        {salvando ? "Aguarde..." : modo === "criar" ? "Criar meu acesso" : "Entrar"}
+      </button>
+      <button disabled={salvando} onClick={() => setModo(modo === "entrar" ? "criar" : "entrar")} className="mt-4 w-full text-sm text-emerald-400 disabled:opacity-50">
+        {modo === "entrar" ? "Primeiro acesso? Criar senha" : "Já tenho conta. Voltar para entrar"}
+      </button>
+      <p className="mt-5 text-center text-xs text-slate-500">Somente o e-mail autorizado tem permissão para acessar os registros e as fotos.</p>
+    </section>
+  </main>;
 }
