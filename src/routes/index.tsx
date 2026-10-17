@@ -189,44 +189,92 @@ function Index() {
     if (!lista || pacote === null || !supabase || !usuario) return;
     if (!nome.trim()) return setErro("Informe o nome de quem recebeu.");
     if (!fotos.length) return setErro("Adicione pelo menos uma foto da entrega.");
+
     const atual = lista.pacotes.find((p) => p.numero === pacote);
-    if (!atual || atual.status !== "pendente" || !atual.id) return setErro("Este pacote já foi registrado ou não está disponível.");
+    if (!atual || atual.status !== "pendente" || !atual.id) {
+      return setErro("Este pacote já foi registrado ou não está disponível.");
+    }
 
     setSalvando(true);
     setErro("");
     const arquivosEnviados: string[] = [];
-    try {
-      const { error: pacoteError } = await supabase.from("pacotes").update({ nome_recebedor: nome.trim(), data_entrega: data, hora_entrega: hora, status: "registrado", registrado_por: usuario }).eq("id", atual.id).eq("status", "pendente");
-      if (pacoteError) throw pacoteError;
+    const fotosInseridas: string[] = [];
+    let registroConcluido = false;
 
+    try {
+      // Primeiro envia e registra as fotos. O pacote só muda de status depois
+      // que todas as fotos forem salvas com sucesso.
       for (let i = 0; i < fotos.length; i++) {
         const foto = fotos[i];
         if (!foto.file) continue;
-        const path = `${usuario}/${lista.id}/pacote-${pacote}-${Date.now()}-${i}-${crypto.randomUUID()}.${foto.file.type.split("/")[1] || "jpg"}`;
-        const { error: uploadError } = await supabase.storage.from("fotos-entregas").upload(path, foto.file, { contentType: foto.file.type, upsert: false });
+
+        const extensao = foto.file.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+        const path = `${usuario}/${lista.id}/pacote-${pacote}-${Date.now()}-${i}-${crypto.randomUUID()}.${extensao}`;
+        const { error: uploadError } = await supabase.storage
+          .from("fotos-entregas")
+          .upload(path, foto.file, { contentType: foto.file.type, upsert: false });
         if (uploadError) throw uploadError;
         arquivosEnviados.push(path);
-        const { error: fotoError } = await supabase.from("fotos_entrega").insert({ pacote_id: atual.id, storage_path: path, captured_at: foto.dataHora });
+
+        const { data: fotoSalva, error: fotoError } = await supabase
+          .from("fotos_entrega")
+          .insert({ pacote_id: atual.id, storage_path: path, captured_at: foto.dataHora })
+          .select("id")
+          .single();
         if (fotoError) throw fotoError;
+        fotosInseridas.push(fotoSalva.id);
       }
 
-      const semArquivo = fotos.filter((f) => !f.file);
-      if (semArquivo.length !== fotos.length) {
-        // As fotos novas foram persistidas acima; as antigas já pertencem ao pacote.
-      }
+      // Confirma que o pacote realmente foi atualizado; UPDATE sem SELECT pode
+      // retornar zero linhas sem erro quando as permissões não permitem a ação.
+      const { data: pacoteAtualizado, error: pacoteError } = await supabase
+        .from("pacotes")
+        .update({
+          nome_recebedor: nome.trim(),
+          data_entrega: data,
+          hora_entrega: hora,
+          status: "registrado",
+          registrado_por: usuario,
+        })
+        .eq("id", atual.id)
+        .eq("status", "pendente")
+        .select("id")
+        .maybeSingle();
 
-      const carregadas = await carregarListas(usuario);
-      setListas(carregadas);
-      setListaId(lista.id);
+      if (pacoteError) throw pacoteError;
+      if (!pacoteAtualizado) {
+        throw new Error("O pacote não foi atualizado. Verifique as permissões de acesso do banco de dados.");
+      }
+      registroConcluido = true;
+
       setPacote(null);
       setNome("");
       setFotos([]);
       setAba("pendentes");
+
+      try {
+        const carregadas = await carregarListas(usuario);
+        setListas(carregadas);
+        setListaId(lista.id);
+      } catch (e: any) {
+        setErro(`A entrega foi salva, mas não consegui atualizar a lista na tela. Atualize a página. Motivo: ${e.message}`);
+      }
     } catch (e: any) {
-      // Rollback: mantém as fotos na tela para uma nova tentativa e remove o que já subiu.
-      if (arquivosEnviados.length) await supabase.storage.from("fotos-entregas").remove(arquivosEnviados);
-      if (atual.id) await supabase.from("pacotes").update({ nome_recebedor: null, data_entrega: null, hora_entrega: null, status: "pendente", registrado_por: null }).eq("id", atual.id).eq("status", "registrado");
-      setErro(`Não foi possível salvar a entrega. As fotos continuam na tela para tentar novamente. Motivo: ${e.message}`);
+      // Se o salvamento não foi concluído, remove os registros parciais para
+      // evitar fotos órfãs e deixa os arquivos na tela para nova tentativa.
+      if (!registroConcluido) {
+        if (fotosInseridas.length) {
+          await supabase.from("fotos_entrega").delete().in("id", fotosInseridas);
+        }
+        if (arquivosEnviados.length) {
+          await supabase.storage.from("fotos-entregas").remove(arquivosEnviados);
+        }
+      }
+      setErro(
+        registroConcluido
+          ? `A entrega foi salva, mas ocorreu um erro ao atualizar a tela. Atualize a página. Motivo: ${e.message}`
+          : `Não foi possível salvar a entrega. As fotos continuam na tela para tentar novamente. Motivo: ${e.message}`,
+      );
     } finally {
       setSalvando(false);
     }
