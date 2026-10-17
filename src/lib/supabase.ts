@@ -1,10 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env["VITE_SUPABASE_URL"] as string | undefined;
-const supabasePublishableKey = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] as string | undefined;
+// Projeto Fotos Aline: usa somente a chave pública (publishable) no navegador.
+// A segurança dos dados é aplicada por autenticação e políticas RLS no Supabase.
+const supabaseUrl = "https://drxkanfojvtdaswnxpmi.supabase.co";
+const supabasePublishableKey = "sb_publishable_PQspzucM4rVXcPYkJmoCMw_AX_Lfo6m";
 
-export const supabase = supabaseUrl && supabasePublishableKey
-  ? createClient(supabaseUrl, supabasePublishableKey)
-  : null;
-
-export const SUPABASE_CONFIGURED = Boolean(supabase);
+export const supabase = createClient(supabaseUrl, supabasePublishableKey);
+export const SUPABASE_CONFIGURED = true;
