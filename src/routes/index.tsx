@@ -26,7 +26,7 @@ function Index() {
             {usuario.charAt(0)}
           </div>
           <h1 className="text-3xl font-bold text-pink-700">Olá, {usuario}! 💗</h1>
-          <p className="mt-2 text-gray-600">Você entrou no Projeto Aline.</p>
+          <p className="mt-2 text-gray-600">Você entrou no Baixas de Entregas.</p>
           <button
             type="button"
             onClick={sair}
@@ -46,7 +46,7 @@ function Index() {
           <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-pink-500 text-4xl text-white">
             💗
           </div>
-          <h1 className="text-3xl font-bold text-pink-700">Projeto Aline</h1>
+          <h1 className="text-3xl font-bold text-pink-700">Baixas de Entregas</h1>
           <p className="mt-2 text-gray-600">Escolha seu usuário para entrar</p>
           <p className="mt-1 text-sm text-gray-400">Não é necessário usar senha.</p>
         </div>
