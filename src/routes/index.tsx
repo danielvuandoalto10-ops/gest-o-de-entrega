@@ -26,7 +26,7 @@ function Index() {
             {usuario.charAt(0)}
           </div>
           <h1 className="text-3xl font-bold text-white">Olá, {usuario}!</h1>
-          <p className="mt-2 text-slate-400">Você entrou no Baixas sem Entrega.</p>
+          <p className="mt-2 text-slate-400">Você entrou no Baixa de Entregas.</p>
           <button
             type="button"
             onClick={sair}
@@ -46,7 +46,7 @@ function Index() {
           <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-800 text-3xl font-bold text-emerald-500 ring-1 ring-slate-700">
             BE
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Baixas sem Entrega</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">Baixa de Entregas</h1>
           <p className="mt-3 text-slate-400">Escolha seu usuário para acessar o aplicativo.</p>
           <p className="mt-1 text-sm text-slate-500">Acesso rápido, sem senha.</p>
         </div>
@@ -66,12 +66,12 @@ function Index() {
 
           <button
             type="button"
-            onClick={() => entrar("Arranjar")}
+            onClick={() => entrar("Rangel")}
             className="flex w-full items-center gap-4 rounded-xl border border-slate-700 bg-slate-800/70 p-4 text-left transition hover:border-emerald-500 hover:bg-slate-800 active:scale-[0.99]"
           >
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-700 font-bold text-white">A</span>
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-700 font-bold text-white">R</span>
             <span>
-              <strong className="block text-lg text-white">Arranjar</strong>
+              <strong className="block text-lg text-white">Rangel</strong>
               <span className="text-sm text-slate-400">Entrar sem senha</span>
             </span>
           </button>
