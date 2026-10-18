@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { criarSupabaseParaUsuario } from "../lib/supabase";
 
 export const Route = createFileRoute("/")({
@@ -165,6 +165,11 @@ function Index() {
   const [motivo, setMotivo] = useState<Motivo>("Destinatário ausente");
   const [observacao, setObservacao] = useState("");
   const [textoOCR, setTextoOCR] = useState("");
+  const [cameraAberta, setCameraAberta] = useState(false);
+  const [fotosRascunho, setFotosRascunho] = useState<{ id: string; file: File; url: string }[]>([]);
+  const [ocrProcessando, setOcrProcessando] = useState(false);
+  const videoCameraRef = useRef<HTMLVideoElement | null>(null);
+  const streamCameraRef = useRef<MediaStream | null>(null);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
@@ -277,7 +282,49 @@ function Index() {
     setTipoRegistro("entregue"); setMotivo("Destinatário ausente"); setObservacao(""); setTextoOCR(""); setErro("");
   };
 
-  const addFotos = (files: FileList | null) => {
+  const identificarEndereco = (texto: string) => {
+    const linhas = texto.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const idx = linhas.findIndex((x) => /\b(rua|avenida|av\.?|travessa|alameda|estrada|rodovia|praça|largo|rod\.?|cep)\b/i.test(x) || /\b\d{5}-?\d{3}\b/.test(x));
+    if (idx < 0) return "";
+    const candidatas = linhas.slice(idx, Math.min(linhas.length, idx + 4));
+    return candidatas.join(", ").slice(0, 400);
+  };
+
+  const reconhecerTexto = async (arquivo: File) => {
+    try {
+      let tesseract = (window as any).Tesseract;
+      if (!tesseract) {
+        await new Promise<void>((resolve, reject) => {
+          const existente = document.querySelector<HTMLScriptElement>('script[data-ocr-tesseract="true"]');
+          if (existente) {
+            existente.addEventListener("load", () => resolve(), { once: true });
+            existente.addEventListener("error", () => reject(new Error("Falha ao carregar OCR")), { once: true });
+            if ((window as any).Tesseract) resolve();
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+          script.async = true;
+          script.dataset.ocrTesseract = "true";
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Falha ao carregar OCR"));
+          document.head.appendChild(script);
+        });
+        tesseract = (window as any).Tesseract;
+      }
+      if (!tesseract?.recognize) return;
+      const resultado = await tesseract.recognize(arquivo, "por+eng");
+      const texto = String(resultado?.data?.text || "").trim();
+      if (!texto) return;
+      setTextoOCR((atual) => atual ? atual + "\n\n" + texto : texto);
+      const enderecoReconhecido = identificarEndereco(texto);
+      if (enderecoReconhecido) setEndereco((atual) => atual.trim() ? atual : enderecoReconhecido);
+    } catch {
+      // OCR é auxiliar: falha de rede ou navegador não bloqueia o registro.
+    }
+  };
+
+  const addFotos = (files: FileList | File[] | null) => {
     if (!files) return;
     const novas: Foto[] = [];
     Array.from(files).forEach((file) => {
@@ -285,26 +332,82 @@ function Index() {
       if (file.size > 15 * 1024 * 1024) { setErro("Uma foto ultrapassa 15 MB. Escolha uma imagem menor."); return; }
       novas.push({ id: crypto.randomUUID(), dataHora: new Date().toISOString(), url: URL.createObjectURL(file), file });
     });
-    if (novas.length) setFotos((v) => [...v, ...novas]);
+    if (novas.length) {
+      setFotos((v) => [...v, ...novas]);
+      setErro("");
+      if (!endereco.trim()) {
+        setOcrProcessando(true);
+        void reconhecerTexto(novas[0]!.file!).finally(() => setOcrProcessando(false));
+      }
+    }
+  };
+
+  const iniciarCamera = async () => {
+    setErro("");
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador não permite abrir a câmera diretamente.");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      streamCameraRef.current = stream;
+      setCameraAberta(true);
+      window.setTimeout(() => {
+        if (videoCameraRef.current) {
+          videoCameraRef.current.srcObject = stream;
+          void videoCameraRef.current.play().catch(() => undefined);
+        }
+      }, 80);
+    } catch {
+      setErro("Não foi possível abrir a câmera nesta sessão. Use “Selecionar fotos” para capturar pela câmera do dispositivo.");
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraAberta || !streamCameraRef.current || !videoCameraRef.current) return;
+    videoCameraRef.current.srcObject = streamCameraRef.current;
+    void videoCameraRef.current.play().catch(() => undefined);
+  }, [cameraAberta]);
+
+  const encerrarCamera = () => {
+    streamCameraRef.current?.getTracks().forEach((track) => track.stop());
+    streamCameraRef.current = null;
+    setCameraAberta(false);
+  };
+
+  const capturarFotoCamera = () => {
+    const video = videoCameraRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setErro("A câmera ainda está iniciando. Tente novamente em instantes.");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return setErro("Não foi possível capturar a imagem.");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return setErro("Não foi possível preparar a foto.");
+      const file = new File([blob], "entrega-" + Date.now() + ".jpg", { type: "image/jpeg" });
+      if (file.size > 15 * 1024 * 1024) return setErro("A foto ultrapassa 15 MB.");
+      setFotosRascunho((v) => [...v, { id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }]);
+      setErro("");
+    }, "image/jpeg", 0.92);
+  };
+
+  const usarFotosCamera = () => {
+    const arquivos = fotosRascunho.map((f) => f.file);
+    encerrarCamera();
+    if (arquivos.length) addFotos(arquivos);
+    fotosRascunho.forEach((f) => URL.revokeObjectURL(f.url));
+    setFotosRascunho([]);
   };
 
   const lerTextoDaFoto = async () => {
     const arquivo = fotos.find((f) => f.file)?.file;
-    const Detector = (window as any).TextDetector;
     if (!arquivo) return setErro("Tire ou selecione uma foto antes de ler a etiqueta.");
-    if (!Detector) return setErro("OCR não disponível neste navegador. Preencha nome e endereço manualmente.");
-    try {
-      const bitmap = await createImageBitmap(arquivo);
-      const blocos = await new Detector().detect(bitmap); bitmap.close();
-      const texto = blocos.map((b: { rawValue?: string }) => b.rawValue?.trim()).filter(Boolean).join("\n");
-      if (!texto) return setErro("Não consegui ler o texto. Preencha os campos manualmente.");
-      setTextoOCR(texto);
-      const linhas = texto.split(/\n+/).map((x) => x.trim()).filter(Boolean);
-      const idx = linhas.findIndex((x) => /\b(rua|avenida|av\.?|travessa|alameda|estrada|rodovia|praça|cep)\b/i.test(x) || /\b\d{5}-?\d{3}\b/.test(x));
-      if (!destinatario.trim() && idx > 0) setDestinatario(linhas[0]);
-      if (!endereco.trim() && idx >= 0) setEndereco(linhas.slice(idx).join(", "));
-      setErro("Texto identificado. Confira os campos antes de salvar.");
-    } catch { setErro("Não foi possível ler essa foto. Preencha os campos manualmente."); }
+    setOcrProcessando(true);
+    await reconhecerTexto(arquivo);
+    setOcrProcessando(false);
+    if (!textoOCR.trim()) setErro("Não consegui reconhecer texto nesta foto. Você pode preencher o endereço manualmente, se necessário.");
   };
 
   const salvar = async () => {
@@ -475,7 +578,7 @@ function Index() {
 
       {lista && detalheId !== null && detalhe && !mostrarResultados && <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-5"><button onClick={() => setDetalheId(null)} className="mb-4 rounded-lg border border-slate-700 px-3 py-2 text-sm">← Voltar</button><p className="text-sm text-slate-400">Detalhes do registro</p><h2 className="mb-4 text-2xl font-bold">Pacote {detalhe.numero}</h2><div className="grid gap-3 rounded-xl bg-slate-950/50 p-4 sm:grid-cols-2"><div><small className="text-slate-400">Status</small><p>{textoStatus(detalhe.status)}</p></div><div><small className="text-slate-400">Destinatário</small><p>{detalhe.destinatario || "Não informado"}</p></div><div><small className="text-slate-400">Endereço</small><p>{detalhe.endereco || "Não informado"}</p></div><div><small className="text-slate-400">Quem recebeu</small><p>{detalhe.nome || "Não informado"}</p></div><div><small className="text-slate-400">Parada/rota</small><p>{detalhe.paradaRota || "Não informada"}</p></div><div><small className="text-slate-400">Data da lista</small><p>{dataBR(lista.data)}</p></div><div><small className="text-slate-400">Data da tentativa/entrega</small><p>{dataBR(detalhe.dataEntrega)} {detalhe.horaEntrega}</p></div>{detalhe.tentativaEm && <div><small className="text-slate-400">Tentativa registrada em</small><p>{new Date(detalhe.tentativaEm).toLocaleString("pt-BR")}</p></div>}{detalhe.motivoInsucesso && <div><small className="text-slate-400">Motivo do insucesso</small><p>{detalhe.motivoInsucesso}</p></div>}{detalhe.observacaoInsucesso && <div className="sm:col-span-2"><small className="text-slate-400">Observação</small><p>{detalhe.observacaoInsucesso}</p></div>}</div><h3 className="mb-3 mt-6 font-semibold">Fotos ({detalhe.fotos.length})</h3><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{detalhe.fotos.map((f, i) => <button key={f.id} onClick={() => setZoom({fotos:detalhe.fotos,i})} className="overflow-hidden rounded-xl border border-slate-700 text-left">{f.url ? <img src={f.url} alt="Foto da entrega" className="h-36 w-full object-cover" /> : <div className="p-8 text-xs text-slate-400">Foto indisponível</div>}<p className="p-2 text-xs">{new Date(f.dataHora).toLocaleString("pt-BR")}</p></button>)}</div>{detalhe.status === "registrado" && <button disabled={salvando} onClick={confirmar} className="mt-5 w-full rounded-xl bg-emerald-600 p-3 font-semibold disabled:opacity-50">Confirmar conferência</button>}</section>}
 
-      {lista && pacote !== null && !mostrarResultados && <section className="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900 p-5"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">Registrar pacote {pacote}</h2><button disabled={salvando} onClick={() => setPacote(null)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">← Voltar</button></div><div className="mb-4 grid grid-cols-2 gap-2"><button onClick={() => setTipoRegistro("entregue")} className={"rounded-lg p-3 text-sm font-semibold " + (tipoRegistro === "entregue" ? "bg-emerald-600" : "bg-slate-800")}>✓ Entregue</button><button onClick={() => setTipoRegistro("sem_sucesso")} className={"rounded-lg p-3 text-sm font-semibold " + (tipoRegistro === "sem_sucesso" ? "bg-amber-700" : "bg-slate-800")}>! Sem sucesso</button></div><label className="block text-sm">Nome de quem recebeu {tipoRegistro === "entregue" ? "(obrigatório)" : "(se disponível)"}<input value={nome} onChange={(e) => setNome(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="mt-3 block text-sm">Cliente/destinatário<input value={destinatario} onChange={(e) => setDestinatario(e.target.value)} placeholder="Nome na etiqueta" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="mt-3 block text-sm">Endereço<input value={endereco} onChange={(e) => setEndereco(e.target.value)} placeholder="Endereço da entrega" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="mt-3 block text-sm">Parada/rota<input value={paradaRota} onChange={(e) => setParadaRota(e.target.value)} placeholder="Ex.: 5" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-sm">Data da tentativa/entrega<input type="date" value={data} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="text-sm">Horário<input type="time" value={hora} onChange={(e) => setHora(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label></div>{tipoRegistro === "sem_sucesso" && <div className="mt-4 rounded-xl border border-amber-900/70 bg-amber-950/30 p-3"><label className="block text-sm">Motivo da tentativa sem sucesso<select value={motivo} onChange={(e) => setMotivo(e.target.value as Motivo)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3">{(["Destinatário ausente","Endereço não localizado","Imóvel não encontrado","Destinatário não localizado","Outro motivo"] as Motivo[]).map((m) => <option key={m}>{m}</option>)}</select></label>{motivo === "Outro motivo" && <label className="mt-3 block text-sm">Descreva o motivo<textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={3} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label>}<p className="mt-2 text-xs text-slate-400">Data e hora da tentativa serão salvas automaticamente junto com o motivo.</p></div>}<div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><b>Fotos</b><p className="text-xs text-slate-400">{tipoRegistro === "entregue" ? "Obrigatória para confirmar a entrega." : "Opcional para registrar o insucesso."}</p></div><label className="cursor-pointer rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">📷 Tirar foto<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => addFotos(e.target.files)} /></label></div><label className="mt-3 inline-block cursor-pointer text-sm text-emerald-400">Selecionar fotos<input type="file" accept="image/*" multiple className="hidden" onChange={(e) => addFotos(e.target.files)} /></label><button type="button" onClick={lerTextoDaFoto} className="mt-3 block rounded-lg border border-slate-700 px-3 py-2 text-sm">Ler texto da etiqueta (OCR, se disponível)</button>{textoOCR && <details className="mt-3 rounded-lg bg-slate-800 p-3"><summary className="cursor-pointer text-sm">Texto identificado — confira</summary><pre className="mt-2 whitespace-pre-wrap text-xs">{textoOCR}</pre></details>}{fotos.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">{fotos.map((f) => <div key={f.id} className="relative"><img src={f.url} alt="Prévia da foto" className="h-24 w-full rounded-lg object-cover" /><button onClick={() => setFotos((atual) => atual.filter((x) => x.id !== f.id))} className="absolute right-1 top-1 rounded bg-black/70 px-2 py-1 text-xs">×</button></div>)}</div>}</div><button disabled={salvando || !db} onClick={salvar} className="mt-4 w-full rounded-xl bg-emerald-600 p-4 font-bold disabled:opacity-50">{salvando ? "Salvando..." : tipoRegistro === "entregue" ? "Salvar entrega" : "Registrar insucesso"}</button></section>}
+      {lista && pacote !== null && !mostrarResultados && <section className="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900 p-5"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">Registrar pacote {pacote}</h2><button disabled={salvando} onClick={() => setPacote(null)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">← Voltar</button></div><div className="mb-4 grid grid-cols-2 gap-2"><button onClick={() => setTipoRegistro("entregue")} className={"rounded-lg p-3 text-sm font-semibold " + (tipoRegistro === "entregue" ? "bg-emerald-600" : "bg-slate-800")}>✓ Entregue</button><button onClick={() => setTipoRegistro("sem_sucesso")} className={"rounded-lg p-3 text-sm font-semibold " + (tipoRegistro === "sem_sucesso" ? "bg-amber-700" : "bg-slate-800")}>! Sem sucesso</button></div><label className="block text-sm">Nome de quem recebeu {tipoRegistro === "entregue" ? "(obrigatório)" : "(se disponível)"}<input value={nome} onChange={(e) => setNome(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="mt-3 block text-sm">Endereço<input value={endereco} onChange={(e) => setEndereco(e.target.value)} placeholder="Endereço da entrega" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-sm">Data da tentativa/entrega<input type="date" value={data} onChange={(e) => setData(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="text-sm">Horário<input type="time" value={hora} onChange={(e) => setHora(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label></div>{tipoRegistro === "sem_sucesso" && <div className="mt-4 rounded-xl border border-amber-900/70 bg-amber-950/30 p-3"><label className="block text-sm">Motivo da tentativa sem sucesso<select value={motivo} onChange={(e) => setMotivo(e.target.value as Motivo)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3">{(["Destinatário ausente","Endereço não localizado","Imóvel não encontrado","Destinatário não localizado","Outro motivo"] as Motivo[]).map((m) => <option key={m}>{m}</option>)}</select></label>{motivo === "Outro motivo" && <label className="mt-3 block text-sm">Descreva o motivo<textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={3} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label>}<p className="mt-2 text-xs text-slate-400">Data e hora da tentativa serão salvas automaticamente junto com o motivo.</p></div>}<div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><b>Fotos</b><p className="text-xs text-slate-400">{tipoRegistro === "entregue" ? "Obrigatória para confirmar a entrega." : "Opcional para registrar o insucesso."}</p></div><button type="button" onClick={() => void iniciarCamera()} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">📷 Abrir câmera</button></div><label className="mt-3 inline-block cursor-pointer text-sm text-emerald-400">Selecionar fotos<input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addFotos(e.target.files); e.currentTarget.value = ""; }} /></label><p className="mt-3 text-xs text-slate-400">{ocrProcessando ? "Tentando identificar o endereço pela foto…" : "O aplicativo tentará reconhecer automaticamente o endereço nas fotos."}</p>{textoOCR && <details className="mt-3 rounded-lg bg-slate-800 p-3"><summary className="cursor-pointer text-sm">Texto identificado — confira</summary><pre className="mt-2 whitespace-pre-wrap text-xs">{textoOCR}</pre></details>}{fotos.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">{fotos.map((f) => <div key={f.id} className="relative"><img src={f.url} alt="Prévia da foto" className="h-24 w-full rounded-lg object-cover" /><button onClick={() => setFotos((atual) => atual.filter((x) => x.id !== f.id))} className="absolute right-1 top-1 rounded bg-black/70 px-2 py-1 text-xs">×</button></div>)}</div>}</div>{cameraAberta && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/90 p-3"><section role="dialog" aria-modal="true" className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-4"><div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-bold">Capturar fotos</h3><button type="button" onClick={encerrarCamera} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Fechar câmera</button></div><video ref={videoCameraRef} autoPlay playsInline muted className="max-h-[52vh] w-full rounded-xl bg-black object-contain" /><div className="mt-3 flex gap-2"><button type="button" onClick={capturarFotoCamera} className="flex-1 rounded-xl bg-emerald-600 p-3 font-bold">Tirar foto</button><button type="button" disabled={!fotosRascunho.length} onClick={usarFotosCamera} className="flex-1 rounded-xl border border-emerald-600 p-3 font-bold disabled:opacity-40">Usar fotos ({fotosRascunho.length})</button></div><p className="mt-2 text-xs text-slate-400">Você pode capturar várias imagens sem fechar a câmera. Revise abaixo e confirme para anexá-las.</p>{fotosRascunho.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">{fotosRascunho.map((f) => <div key={f.id} className="relative"><img src={f.url} alt="Foto capturada" className="h-24 w-full rounded-lg object-cover" /><button type="button" onClick={() => { setFotosRascunho((v) => v.filter((x) => x.id !== f.id)); URL.revokeObjectURL(f.url); }} className="absolute right-1 top-1 rounded bg-black/70 px-2 py-1 text-xs">Remover</button></div>)}</div>}</section></div>}<button disabled={salvando || !db} onClick={salvar} className="mt-4 w-full rounded-xl bg-emerald-600 p-4 font-bold disabled:opacity-50">{salvando ? "Salvando..." : tipoRegistro === "entregue" ? "Salvar entrega" : "Registrar insucesso"}</button></section>}
     </div>
 
 
