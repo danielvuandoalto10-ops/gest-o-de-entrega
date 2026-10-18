@@ -179,6 +179,6 @@ body {
   color: var(--user-accent) !important;
 }
 
-.user-themed .hover\\:border-emerald-500:hover {
+.user-themed [class~="hover:border-emerald-500"]:hover {
   border-color: var(--user-accent) !important;
 }
