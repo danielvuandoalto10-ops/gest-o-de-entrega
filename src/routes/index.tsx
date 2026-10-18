@@ -1,15 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { Button } from "@/components/ui/button";
-import { EMAIL_AUTORIZADO, entrarComSenha, recuperarSenha, mensagemAuth, emailAutorizado } from "@/lib/delivery-auth";
+import { EMAIL_AUTORIZADO } from "@/lib/delivery-auth";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [
-    { title: "Baixas de Entrega | Acesso e registros" },
-    { name: "description", content: "Acesso autorizado aos registros e fotos de baixas de entrega." },
-    { property: "og:title", content: "Baixas de Entrega | Acesso e registros" },
-    { property: "og:description", content: "Registros e fotos de baixas de entrega com acesso protegido." },
+    { title: "Baixas de Entrega | Registros" },
+    { name: "description", content: "Registros e fotos de baixas de entrega." },
+    { property: "og:title", content: "Baixas de Entrega | Registros" },
+    { property: "og:description", content: "Registros e fotos de baixas de entrega." },
     { property: "og:type", content: "website" },
     { name: "twitter:card", content: "summary" },
   ] }),
@@ -91,7 +90,7 @@ async function carregarListas(usuario: string): Promise<Lista[]> {
 }
 
 function Index() {
-  const [usuario, setUsuario] = useState<string | null>(null);
+  const usuario = EMAIL_AUTORIZADO;
   const [listas, setListas] = useState<Lista[]>([]);
   const [listaId, setListaId] = useState<string | null>(null);
   const [pacote, setPacote] = useState<number | null>(null);
@@ -102,7 +101,6 @@ function Index() {
   const [hora, setHora] = useState("");
   const [fotos, setFotos] = useState<Foto[]>([]);
   const [erro, setErro] = useState("");
-  const [avisoAuth, setAvisoAuth] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [nova, setNova] = useState(false);
@@ -117,53 +115,6 @@ function Index() {
   const detalhe = lista?.pacotes.find((p) => p.numero === detalheId);
 
   useEffect(() => {
-    const recoveryHash = new URLSearchParams(window.location.hash.slice(1));
-    if (recoveryHash.get("type") === "recovery" || recoveryHash.has("error_description")) {
-      window.location.replace(`/reset-password${window.location.hash}`);
-      return;
-    }
-    if (!supabase) return;
-    let ativo = true;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((evento, session) => {
-      if (evento === "PASSWORD_RECOVERY") {
-        setUsuario(null);
-        window.location.replace(`/reset-password${window.location.hash}`);
-        return;
-      }
-      if (evento !== "SIGNED_OUT") return;
-      setUsuario(null);
-      setListas([]);
-      setListaId(null);
-    });
-
-    const validarUsuario = async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (!ativo) return;
-      if (error) {
-        setUsuario(null);
-        return;
-      }
-      const email = data.user?.email?.toLowerCase() ?? null;
-      if (email && email !== EMAIL_AUTORIZADO) {
-        void supabase.auth.signOut();
-        if (ativo) {
-          setUsuario(null);
-          setErro("Este e-mail não tem autorização para acessar o aplicativo.");
-        }
-        return;
-      }
-      if (ativo) setUsuario(email);
-    };
-    void validarUsuario().catch(error => { if (ativo) setErro(mensagemAuth(error)); });
-
-    return () => {
-      ativo = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
     if (!usuario || !supabase) return;
     setCarregando(true);
     carregarListas(usuario)
@@ -174,44 +125,6 @@ function Index() {
       .catch((e) => setErro(`Não foi possível carregar os registros: ${e.message}`))
       .finally(() => setCarregando(false));
   }, [usuario]);
-
-  const entrar = async (email: string, senha: string) => {
-    setSalvando(true);
-    setErro("");
-    setAvisoAuth("");
-    try {
-      await entrarComSenha(supabase, email, senha);
-      const { data, error } = await supabase.auth.getUser();
-      if (error) throw error;
-      if (!emailAutorizado(data.user?.email)) {
-        await supabase.auth.signOut();
-        throw new Error("Este e-mail não tem autorização para acessar o aplicativo.");
-      }
-      setUsuario(EMAIL_AUTORIZADO);
-    } catch (error) {
-      setErro(mensagemAuth(error));
-    } finally {
-      setSalvando(false);
-    }
-  };
-
-  const esqueciSenha = async () => {
-    setSalvando(true);
-    setErro("");
-    setAvisoAuth("");
-    try {
-      await recuperarSenha(supabase);
-      setAvisoAuth("Solicitação enviada. Confira seu e-mail e a pasta de spam para recuperar a senha.");
-    } catch (error) { setErro(mensagemAuth(error)); }
-    finally { setSalvando(false); }
-  };
-
-  const sair = async () => {
-    if (supabase) await supabase.auth.signOut();
-    setUsuario(null);
-    setListas([]);
-    setListaId(null);
-  };
 
   const criarLista = async () => {
     const n = Number(qtd);
@@ -380,10 +293,8 @@ function Index() {
     }
   };
 
-  if (!usuario) return <Login entrar={entrar} esqueciSenha={esqueciSenha} erro={erro} aviso={avisoAuth} salvando={salvando} />;
-
   return <main className="min-h-screen bg-slate-950 text-white">
-    <header className="border-b border-slate-800 bg-slate-900 px-4 py-4"><div className="mx-auto flex max-w-6xl justify-between"><div><h1 className="text-2xl font-bold">Baixa de Entregas</h1><p className="text-sm text-slate-400">Usuário: {usuario}</p></div><button onClick={sair} className="rounded-lg border border-slate-700 px-3 py-2">Sair</button></div></header>
+    <header className="border-b border-slate-800 bg-slate-900 px-4 py-4"><div className="mx-auto max-w-6xl"><h1 className="text-2xl font-bold">Baixa de Entregas</h1><p className="text-sm text-slate-400">Registros e fotos de entregas</p></div></header>
     <div className="mx-auto max-w-6xl px-4 py-6">
       {erro && <div className="mb-5 rounded-xl border border-red-900 bg-red-950/60 p-4 text-sm text-red-200">{erro}</div>}
       {!supabase && <div className="mb-5 rounded-xl border border-amber-800 bg-amber-950/50 p-4 text-sm text-amber-200">O aplicativo ainda precisa das variáveis do Supabase para salvar na nuvem.</div>}
@@ -398,38 +309,3 @@ function Index() {
   </main>;
 }
 
-function Login({
-  entrar,
-  esqueciSenha,
-  erro,
-  aviso,
-  salvando,
-}: {
-  entrar: (email: string, senha: string) => void;
-  esqueciSenha: () => void;
-  erro: string;
-  aviso: string;
-  salvando: boolean;
-}) {
-  const [senha, setSenha] = useState("");
-
-  return <main className="auth-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-    <section className="w-full max-w-md rounded-lg border border-border bg-card p-8">
-      <h1 className="mb-2 text-center text-3xl font-bold">Baixa de Entregas</h1>
-      <p className="mb-6 text-center text-muted-foreground">Acesso protegido por e-mail e senha.</p>
-      {erro && <div role="alert" className="mb-4 break-words rounded-lg border border-destructive p-3 text-sm text-destructive">{erro}</div>}
-      {aviso && <p role="status" className="mb-4 text-sm text-foreground">{aviso}</p>}
-      <form onSubmit={event => { event.preventDefault(); entrar(EMAIL_AUTORIZADO, senha); }}>
-      <label className="block text-sm">E-mail autorizado
-        <input type="email" autoComplete="username" value={EMAIL_AUTORIZADO} readOnly className="mt-1 w-full rounded-lg border border-input bg-secondary p-3" />
-      </label>
-      <label className="mt-4 block text-sm">Senha
-        <input required type="password" autoComplete="current-password" value={senha} onChange={e => setSenha(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-secondary p-3" />
-      </label>
-      <Button type="submit" disabled={salvando || !senha} className="mt-5 h-12 w-full font-bold">{salvando ? "Aguarde..." : "Entrar"}</Button>
-      </form>
-      <Button type="button" variant="link" disabled={salvando} onClick={esqueciSenha} className="mt-4 w-full">Esqueci minha senha</Button>
-      <p className="mt-5 text-center text-xs text-muted-foreground">Somente o e-mail autorizado tem permissão para acessar os registros e as fotos.</p>
-    </section>
-  </main>;
-}
