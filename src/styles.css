@@ -142,3 +142,16 @@
     color: var(--color-foreground);
   }
 }
+
+.auth-theme {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --primary: oklch(0.596 0.145 163.225);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --input: oklch(0.372 0.044 257.287);
+  --border: oklch(0.279 0.041 260.031);
+  --destructive: oklch(0.808 0.114 19.571);
+}
