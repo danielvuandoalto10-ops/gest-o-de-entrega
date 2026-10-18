@@ -79,6 +79,11 @@ function Index() {
   const [coresUsuario, setCoresUsuario] = useState<Record<Usuario, string>>({ Daniel: "#10b981", Rafael: "#3b82f6" });
   const [fontesUsuario, setFontesUsuario] = useState<Record<Usuario, string>>({ Daniel: "Poppins", Rafael: "Poppins" });
   const [preferenciasCarregadas, setPreferenciasCarregadas] = useState(false);
+  const [fotosPerfil, setFotosPerfil] = useState<Record<Usuario, string | null>>({ Daniel: null, Rafael: null });
+  const [fotoPerfilPendente, setFotoPerfilPendente] = useState<{ usuario: Usuario; arquivo: File; previa: string } | null>(null);
+  const [salvandoFotoPerfil, setSalvandoFotoPerfil] = useState(false);
+  const [salvandoPreferencias, setSalvandoPreferencias] = useState(false);
+  const [erroPersonalizacao, setErroPersonalizacao] = useState("");
 
   useEffect(() => {
     try {
@@ -101,6 +106,49 @@ function Index() {
     try { window.localStorage.setItem("baixas-sem-entrega-preferencias-visuais-v1", JSON.stringify({ cores: coresUsuario, fontes: fontesUsuario })); } catch {}
   }, [coresUsuario, fontesUsuario, preferenciasCarregadas]);
   const db = useMemo(() => usuario ? criarSupabaseParaUsuario(usuario) : null, [usuario]);
+
+  useEffect(() => {
+    let ativo = true;
+    const carregarFotosPerfil = async () => {
+      const pares = await Promise.all((["Daniel", "Rafael"] as Usuario[]).map(async (u) => {
+        const cliente = criarSupabaseParaUsuario(u);
+        const { data, error } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 3600);
+        return [u, !error && data?.signedUrl ? data.signedUrl : null] as const;
+      }));
+      if (ativo) setFotosPerfil((atuais) => ({ ...atuais, ...Object.fromEntries(pares) }) as Record<Usuario, string | null>);
+    };
+    void carregarFotosPerfil();
+    return () => { ativo = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!usuario || !db) return;
+    let ativo = true;
+    const carregarPreferenciasRemotas = async () => {
+      try {
+        const { data, error } = await db.storage.from("fotos-entregas").download(usuario + "/profile/preferences.json");
+        if (error || !data) return;
+        const config = JSON.parse(await data.text());
+        const fontesValidas = ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"];
+        if (!ativo) return;
+        if (/^#[0-9a-fA-F]{6}$/.test(config?.cor ?? "")) setCoresUsuario((v) => ({ ...v, [usuario]: config.cor }));
+        if (fontesValidas.includes(config?.fonte)) setFontesUsuario((v) => ({ ...v, [usuario]: config.fonte }));
+      } catch {
+        // Se ainda não existe preferência remota, mantém o padrão/cache local sem alterar dados.
+      }
+    };
+    void carregarPreferenciasRemotas();
+    return () => { ativo = false; };
+  }, [usuario, db]);
+
+  useEffect(() => {
+    const fonte = usuario ? fontesUsuario[usuario] : null;
+    if (!fonte || !("fonts" in document)) return;
+    const family = '"' + fonte + '"';
+    void document.fonts.load("400 16px " + family).catch(() => undefined);
+    void document.fonts.load("600 16px " + family).catch(() => undefined);
+    void document.fonts.load("700 16px " + family).catch(() => undefined);
+  }, [usuario, fontesUsuario]);
   const [listas, setListas] = useState<Lista[]>([]);
   const [listaId, setListaId] = useState<string | null>(null);
   const [pacote, setPacote] = useState<number | null>(null);
@@ -325,6 +373,65 @@ function Index() {
     finally { setSalvando(false); }
   };
 
+  const salvarPreferenciasVisuais = async () => {
+    if (!usuario || !db) return;
+    setSalvandoPreferencias(true);
+    setErroPersonalizacao("");
+    try {
+      const configuracao = { cor: coresUsuario[usuario], fonte: fontesUsuario[usuario] };
+      const { error } = await db.storage.from("fotos-entregas").upload(
+        usuario + "/profile/preferences.json",
+        new Blob([JSON.stringify(configuracao)], { type: "application/json" }),
+        { contentType: "application/json", upsert: true },
+      );
+      if (error) throw error;
+      setConfiguracaoVisualAberta(false);
+    } catch (e: any) {
+      setErroPersonalizacao("Não foi possível salvar as preferências no servidor: " + (e?.message || "erro desconhecido"));
+    } finally {
+      setSalvandoPreferencias(false);
+    }
+  };
+
+  const selecionarFotoPerfil = (u: Usuario, arquivo?: File) => {
+    if (!arquivo) return;
+    if (!arquivo.type.startsWith("image/")) {
+      setErroPersonalizacao("Escolha um arquivo de imagem.");
+      return;
+    }
+    if (arquivo.size > 5 * 1024 * 1024) {
+      setErroPersonalizacao("A foto de perfil deve ter no máximo 5 MB.");
+      return;
+    }
+    setErroPersonalizacao("");
+    setFotoPerfilPendente({ usuario: u, arquivo, previa: URL.createObjectURL(arquivo) });
+  };
+
+  const confirmarFotoPerfil = async () => {
+    if (!fotoPerfilPendente) return;
+    setSalvandoFotoPerfil(true);
+    setErroPersonalizacao("");
+    try {
+      const { usuario: u, arquivo } = fotoPerfilPendente;
+      const cliente = criarSupabaseParaUsuario(u);
+      const { error } = await cliente.storage.from("fotos-entregas").upload(
+        u + "/profile/avatar",
+        arquivo,
+        { contentType: arquivo.type, upsert: true },
+      );
+      if (error) throw error;
+      const { data, error: urlError } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 3600);
+      if (urlError || !data?.signedUrl) throw urlError || new Error("A foto foi enviada, mas não foi possível gerar a visualização.");
+      setFotosPerfil((v) => ({ ...v, [u]: data.signedUrl }));
+      URL.revokeObjectURL(fotoPerfilPendente.previa);
+      setFotoPerfilPendente(null);
+    } catch (e: any) {
+      setErroPersonalizacao("Não foi possível salvar a foto de perfil: " + (e?.message || "erro desconhecido"));
+    } finally {
+      setSalvandoFotoPerfil(false);
+    }
+  };
+
   const limparFiltros = () => {
     setFiltroCliente(""); setFiltroEndereco(""); setFiltroParada(""); setFiltroDataInicio(""); setFiltroDataFim("");
     setFiltroEntregaInicio(""); setFiltroEntregaFim(""); setFiltroStatus(""); setFiltroMotivo(""); setMostrarResultados(false);
@@ -333,8 +440,18 @@ function Index() {
   if (!usuario) return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5">
     <section className="w-full max-w-md">
       <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">✓</div><h1 className="text-2xl font-bold">Gestão de Entregas</h1><p className="mt-2 text-sm text-slate-400">Selecione seu usuário para continuar</p></div>
-      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <button key={u} onClick={() => { limparFiltros(); setUsuario(u); }} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 text-lg font-semibold transition hover:border-emerald-500 hover:bg-slate-800">{u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span></button>)}</div>
+      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <div key={u} className="rounded-2xl border border-slate-700 bg-slate-900 p-4 text-center">
+        <button onClick={() => { limparFiltros(); setUsuario(u); }} className="w-full rounded-xl p-2 text-lg font-semibold transition hover:bg-slate-800">
+          {fotosPerfil[u] ? <img src={fotosPerfil[u]!} alt={"Foto de " + u} className="mx-auto mb-3 h-20 w-20 rounded-full border-2 border-slate-600 object-cover" /> : <span className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full border-2 border-slate-600 bg-slate-800 text-2xl">{u.slice(0,1)}</span>}
+          {u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span>
+        </button>
+        <label className="mt-2 inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Escolher foto
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { selecionarFotoPerfil(u, e.target.files?.[0]); e.currentTarget.value = ""; }} />
+        </label>
+      </div>)}</div>
+      {erroPersonalizacao && <p role="alert" className="mt-4 rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">{erroPersonalizacao}</p>}
     </section>
+    {fotoPerfilPendente && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"><section role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 text-center"><h2 className="text-lg font-bold">Confirmar foto de {fotoPerfilPendente.usuario}</h2><img src={fotoPerfilPendente.previa} alt="Prévia da nova foto de perfil" className="mx-auto my-4 h-32 w-32 rounded-full object-cover" /><p className="text-sm text-slate-300">A foto atual só será substituída depois da confirmação.</p>{erroPersonalizacao && <p role="alert" className="mt-3 text-sm text-red-300">{erroPersonalizacao}</p>}<div className="mt-5 flex gap-3"><button disabled={salvandoFotoPerfil} onClick={() => { URL.revokeObjectURL(fotoPerfilPendente.previa); setFotoPerfilPendente(null); setErroPersonalizacao(""); }} className="flex-1 rounded-xl border border-slate-700 p-3">Cancelar</button><button disabled={salvandoFotoPerfil} onClick={confirmarFotoPerfil} className="flex-1 rounded-xl bg-emerald-600 p-3 font-semibold disabled:opacity-50">{salvandoFotoPerfil ? "Salvando..." : "Confirmar foto"}</button></div></section></div>}
   </main>;
 
   const corAtiva = coresUsuario[usuario];
@@ -362,7 +479,7 @@ function Index() {
     </div>
 
 
-    {configuracaoVisualAberta && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/75 p-3 sm:items-center"><section role="dialog" aria-modal="true" aria-labelledby="aparencia-titulo" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl sm:p-6"><div className="mb-5 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--user-accent)" }}>Preferências deste painel</p><h2 id="aparencia-titulo" className="mt-1 text-xl font-bold">Personalizar aparência</h2><p className="mt-1 text-sm text-slate-400">As cores ficam salvas separadamente para {usuario}.</p></div><button onClick={() => setConfiguracaoVisualAberta(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Fechar</button></div><div className="mb-5 rounded-xl border border-slate-700 bg-slate-950 p-4"><p className="mb-3 text-sm font-semibold">Cor do tema</p><div className="mb-4 flex flex-wrap items-center gap-3"><span className="h-10 w-10 rounded-xl border border-white/20 shadow-inner" style={{ backgroundColor: corAtiva }} /><div><p className="font-medium">{corAtiva.toUpperCase()}</p><p className="text-xs text-slate-400">Prévia aplicada ao painel de {usuario}</p></div><button onClick={() => setCoresUsuario((v) => ({ ...v, [usuario]: usuario === "Daniel" ? "#10b981" : "#3b82f6" }))} className="ml-auto rounded-lg border border-slate-700 px-3 py-2 text-xs">Restaurar padrão</button></div><label className="mb-2 block text-sm text-slate-300">Código HEX personalizado</label><div className="mb-5 flex gap-2"><input value={corPersonalizada} onChange={(e) => setCorPersonalizada(e.target.value)} maxLength={7} placeholder="#10B981" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono uppercase" /><button onClick={() => { if (/^#[0-9a-fA-F]{6}$/.test(corPersonalizada)) setCoresUsuario((v) => ({ ...v, [usuario]: corPersonalizada.toLowerCase() })); }} className="rounded-lg px-4 py-2 text-sm font-semibold" style={{ backgroundColor: "var(--user-accent)", color: "var(--user-accent-foreground)" }}>Aplicar HEX</button></div>{PALETA_CORES.map((grupo) => <div key={grupo.nome} className="mb-4"><p className="mb-2 text-xs font-medium text-slate-400">{grupo.nome}</p><div className="grid grid-cols-5 gap-2 sm:grid-cols-10">{grupo.tons.map((tom) => <button key={tom} type="button" title={tom.toUpperCase()} aria-label={grupo.nome + " " + tom} aria-pressed={corAtiva.toLowerCase() === tom.toLowerCase()} onClick={() => { setCoresUsuario((v) => ({ ...v, [usuario]: tom })); setCorPersonalizada(tom); }} className={"h-9 w-full rounded-lg border transition hover:scale-105 " + (corAtiva.toLowerCase() === tom.toLowerCase() ? "border-white ring-2 ring-white ring-offset-2 ring-offset-slate-900" : "border-white/15")} style={{ backgroundColor: tom }} />)}</div></div>)}</div><div className="rounded-xl border border-slate-700 p-4"><h3 className="font-semibold">Tipografia de {usuario}</h3><p className="mt-1 text-sm text-slate-400">Esta escolha é independente e fica salva somente neste painel.</p><label htmlFor="fonte-painel" className="mt-3 mb-2 block text-sm text-slate-300">Fonte do aplicativo</label><select id="fonte-painel" value={fonteAtiva} onChange={(e) => setFontesUsuario((v) => ({ ...v, [usuario]: e.target.value }))} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"><option value="Poppins">Poppins</option><option value="Inter">Inter</option><option value="Roboto">Roboto</option><option value="Nunito Sans">Nunito Sans</option><option value="Lato">Lato</option><option value="Open Sans">Open Sans</option></select><div className="mt-3 rounded-lg bg-slate-800 p-3"><p style={{ fontFamily: fonteAtiva }} className="text-lg font-semibold">Prévia da fonte {fonteAtiva}</p><p style={{ fontFamily: fonteAtiva }} className="mt-1 text-sm text-slate-300">Entregas, endereços e registros — 12345</p></div></div><button onClick={() => setConfiguracaoVisualAberta(false)} className="mt-5 w-full rounded-xl p-3 font-semibold" style={{ backgroundColor: "var(--user-accent)", color: "var(--user-accent-foreground)" }}>Concluir</button></section></div>}
+    {configuracaoVisualAberta && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/75 p-3 sm:items-center"><section role="dialog" aria-modal="true" aria-labelledby="aparencia-titulo" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-4 shadow-2xl sm:p-6"><div className="mb-5 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--user-accent)" }}>Preferências deste painel</p><h2 id="aparencia-titulo" className="mt-1 text-xl font-bold">Personalizar aparência</h2><p className="mt-1 text-sm text-slate-400">As cores ficam salvas separadamente para {usuario}.</p></div><button onClick={() => setConfiguracaoVisualAberta(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Fechar</button></div><div className="mb-5 rounded-xl border border-slate-700 bg-slate-950 p-4"><p className="mb-3 text-sm font-semibold">Cor do tema</p><div className="mb-4 flex flex-wrap items-center gap-3"><span className="h-10 w-10 rounded-xl border border-white/20 shadow-inner" style={{ backgroundColor: corAtiva }} /><div><p className="font-medium">{corAtiva.toUpperCase()}</p><p className="text-xs text-slate-400">Prévia aplicada ao painel de {usuario}</p></div><button onClick={() => setCoresUsuario((v) => ({ ...v, [usuario]: usuario === "Daniel" ? "#10b981" : "#3b82f6" }))} className="ml-auto rounded-lg border border-slate-700 px-3 py-2 text-xs">Restaurar padrão</button></div><label className="mb-2 block text-sm text-slate-300">Código HEX personalizado</label><div className="mb-5 flex gap-2"><input value={corPersonalizada} onChange={(e) => setCorPersonalizada(e.target.value)} maxLength={7} placeholder="#10B981" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono uppercase" /><button onClick={() => { if (/^#[0-9a-fA-F]{6}$/.test(corPersonalizada)) setCoresUsuario((v) => ({ ...v, [usuario]: corPersonalizada.toLowerCase() })); }} className="rounded-lg px-4 py-2 text-sm font-semibold" style={{ backgroundColor: "var(--user-accent)", color: "var(--user-accent-foreground)" }}>Aplicar HEX</button></div>{PALETA_CORES.map((grupo) => <div key={grupo.nome} className="mb-4"><p className="mb-2 text-xs font-medium text-slate-400">{grupo.nome}</p><div className="grid grid-cols-5 gap-2 sm:grid-cols-10">{grupo.tons.map((tom) => <button key={tom} type="button" title={tom.toUpperCase()} aria-label={grupo.nome + " " + tom} aria-pressed={corAtiva.toLowerCase() === tom.toLowerCase()} onClick={() => { setCoresUsuario((v) => ({ ...v, [usuario]: tom })); setCorPersonalizada(tom); }} className={"h-9 w-full rounded-lg border transition hover:scale-105 " + (corAtiva.toLowerCase() === tom.toLowerCase() ? "border-white ring-2 ring-white ring-offset-2 ring-offset-slate-900" : "border-white/15")} style={{ backgroundColor: tom }} />)}</div></div>)}</div><div className="rounded-xl border border-slate-700 p-4"><h3 className="font-semibold">Tipografia de {usuario}</h3><p className="mt-1 text-sm text-slate-400">Esta escolha é independente e fica salva somente neste painel.</p><label htmlFor="fonte-painel" className="mt-3 mb-2 block text-sm text-slate-300">Fonte do aplicativo</label><select id="fonte-painel" value={fonteAtiva} onChange={(e) => setFontesUsuario((v) => ({ ...v, [usuario]: e.target.value }))} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"><option value="Poppins">Poppins</option><option value="Inter">Inter</option><option value="Roboto">Roboto</option><option value="Nunito Sans">Nunito Sans</option><option value="Lato">Lato</option><option value="Open Sans">Open Sans</option></select><div className="mt-3 rounded-lg bg-slate-800 p-3"><p style={{ fontFamily: fonteAtiva }} className="text-lg font-semibold">Prévia da fonte {fonteAtiva}</p><p style={{ fontFamily: fonteAtiva }} className="mt-1 text-sm text-slate-300">Entregas, endereços e registros — 12345</p></div></div>{erroPersonalizacao && <p role="alert" className="mt-4 rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">{erroPersonalizacao}</p>}<div className="mt-5 flex gap-3"><button disabled={salvandoPreferencias} onClick={() => { setConfiguracaoVisualAberta(false); setErroPersonalizacao(""); }} className="flex-1 rounded-xl border border-slate-700 p-3">Fechar</button><button disabled={salvandoPreferencias} onClick={salvarPreferenciasVisuais} className="flex-1 rounded-xl p-3 font-semibold disabled:opacity-50" style={{ backgroundColor: "var(--user-accent)", color: "var(--user-accent-foreground)" }}>{salvandoPreferencias ? "Salvando..." : "Salvar alterações"}</button></div></section></div>}
 
     {nova && <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"><section className="w-full max-w-md rounded-2xl bg-slate-900 p-5"><h2 className="text-xl font-bold">Nova lista de baixas</h2><label className="mt-4 block text-sm">Data de referência<input type="date" value={dataLista} onChange={(e) => setDataLista(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><label className="mt-3 block text-sm">Quantidade de pacotes<input type="number" min="1" value={qtd} onChange={(e) => setQtd(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" /></label><div className="mt-5 flex gap-3"><button disabled={salvando} onClick={() => setNova(false)} className="flex-1 rounded-xl border border-slate-700 p-3">Cancelar</button><button disabled={salvando} onClick={criarLista} className="flex-1 rounded-xl bg-emerald-600 p-3 font-semibold">{salvando ? "Criando..." : "Criar lista"}</button></div></section></div>}
 
