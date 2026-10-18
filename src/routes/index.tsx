@@ -4,7 +4,7 @@ import { criarSupabaseParaUsuario } from "../lib/supabase";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [
-    { title: "Baixas sem Entrega" },
+    { title: "Gestão de Entregas" },
     { name: "description", content: "Painel de baixas e ocorrências de entrega." },
   ] }),
   component: Index,
@@ -300,7 +300,7 @@ function Index() {
 
   if (!usuario) return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5">
     <section className="w-full max-w-md">
-      <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">✓</div><h1 className="text-2xl font-bold">Baixas sem Entrega</h1><p className="mt-2 text-sm text-slate-400">Selecione seu usuário para continuar</p></div>
+      <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">✓</div><h1 className="text-2xl font-bold">Gestão de Entregas</h1><p className="mt-2 text-sm text-slate-400">Selecione seu usuário para continuar</p></div>
       <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <button key={u} onClick={() => { limparFiltros(); setUsuario(u); }} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 text-lg font-semibold transition hover:border-emerald-500 hover:bg-slate-800">{u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span></button>)}</div>
     </section>
   </main>;
@@ -310,7 +310,7 @@ function Index() {
   const fonteAtiva = fontesUsuario[usuario];
 
   return <main data-user-theme={usuario} style={{ "--user-accent": corAtiva, "--user-accent-foreground": corTextoAtiva, "--user-font": fonteAtiva } as React.CSSProperties} className="user-themed min-h-screen bg-slate-950 text-white">
-    <header className="user-theme-header border-b border-slate-800 bg-slate-900 px-4 py-3"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div><h1 className="text-xl font-bold">Baixas sem Entrega</h1><p className="text-sm text-slate-300">Painel de {usuario}</p></div><div className="flex items-center gap-2"><button aria-label="Personalizar aparência" title="Personalizar aparência" onClick={() => { setCorPersonalizada(corAtiva); setConfiguracaoVisualAberta(true); }} className="rounded-lg border border-slate-600 bg-slate-950/40 px-3 py-2 text-sm transition hover:bg-slate-800">🎨 <span className="hidden sm:inline">Aparência</span></button><button onClick={() => { limparFiltros(); setConfiguracaoVisualAberta(false); setUsuario(null); setListas([]); setListaId(null); setPacote(null); setDetalheId(null); setFiltroAberto(false); setMostrarResultados(false); setErro(""); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Trocar usuário</button></div></div></header>
+    <header className="user-theme-header border-b border-slate-800 bg-slate-900 px-4 py-3"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div><h1 className="text-xl font-bold">Gestão de Entregas</h1><p className="text-sm text-slate-300">Painel de {usuario}</p></div><div className="flex items-center gap-2"><button aria-label="Personalizar aparência" title="Personalizar aparência" onClick={() => { setCorPersonalizada(corAtiva); setConfiguracaoVisualAberta(true); }} className="rounded-lg border border-slate-600 bg-slate-950/40 px-3 py-2 text-sm transition hover:bg-slate-800">🎨 <span className="hidden sm:inline">Aparência</span></button><button onClick={() => { limparFiltros(); setConfiguracaoVisualAberta(false); setUsuario(null); setListas([]); setListaId(null); setPacote(null); setDetalheId(null); setFiltroAberto(false); setMostrarResultados(false); setErro(""); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Trocar usuário</button></div></div></header>
     <div className="mx-auto max-w-6xl px-4 py-5">
       {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
       {carregando && <p className="mb-4 text-sm text-slate-400">Carregando registros de {usuario}...</p>}
