@@ -174,6 +174,7 @@ function Index() {
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  const [excluindoListaId, setExcluindoListaId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"conectando" | "online" | "offline">("conectando");
   const [nova, setNova] = useState(false);
   const [dataLista, setDataLista] = useState(agora().data);
@@ -225,6 +226,56 @@ function Index() {
     const dados = await carregarListas(db, usuario);
     setListas(dados);
     if (selecionarId) setListaId(selecionarId);
+  };
+
+  const excluirLista = async (l: Lista) => {
+    if (!db || !usuario || excluindoListaId) return;
+    const confirmada = window.confirm(
+      `Excluir a lista de ${dataBR(l.data)} de ${usuario}? Esta ação apagará somente esta lista, seus registros e as fotos vinculadas. Não é possível desfazer.`,
+    );
+    if (!confirmada) return;
+
+    setExcluindoListaId(l.id);
+    setErro("");
+    try {
+      const pacoteIds = l.pacotes.map((p) => p.id).filter((id): id is string => Boolean(id));
+      let caminhosFotos: string[] = [];
+      if (pacoteIds.length) {
+        const { data: fotosLista, error: fotosError } = await db
+          .from("fotos_entrega")
+          .select("storage_path")
+          .in("pacote_id", pacoteIds);
+        if (fotosError) throw fotosError;
+        caminhosFotos = (fotosLista ?? []).map((f) => f.storage_path).filter((path): path is string => Boolean(path));
+      }
+
+      for (let i = 0; i < caminhosFotos.length; i += 1000) {
+        const lote = caminhosFotos.slice(i, i + 1000);
+        const { data: removidas, error: storageError } = await db.storage.from("fotos-entregas").remove(lote);
+        if (storageError) throw storageError;
+        if ((removidas ?? []).length !== lote.length) {
+          throw new Error("Nem todas as fotos puderam ser removidas por causa das permissões de armazenamento.");
+        }
+      }
+
+      const { data: removida, error: deleteError } = await db
+        .from("listas_baixas")
+        .delete()
+        .eq("id", l.id)
+        .eq("usuario", usuario)
+        .select("id");
+      if (deleteError) throw deleteError;
+      if (!removida?.length) throw new Error("A lista não foi excluída. Verifique as permissões do usuário.");
+
+      setListas((atuais) => atuais.filter((item) => item.id !== l.id));
+      if (listaId === l.id) setListaId(null);
+      setDetalheId(null);
+      setPacote(null);
+    } catch (e: any) {
+      setErro("Não foi possível excluir a lista de " + dataBR(l.data) + ": " + (e?.message || "erro desconhecido"));
+    } finally {
+      setExcluindoListaId(null);
+    }
   };
 
   useEffect(() => {
@@ -573,7 +624,7 @@ function Index() {
       {usuario && <p role="status" aria-live="polite" className={"mb-4 text-xs " + (syncStatus === "online" ? "text-emerald-400" : syncStatus === "offline" ? "text-amber-300" : "text-slate-400")}>{syncStatus === "online" ? "● Sincronização em tempo real conectada" : syncStatus === "offline" ? "● Conexão em tempo real indisponível; alterações podem demorar para aparecer" : "● Conectando à sincronização em tempo real..."}</p>}
       {!carregando && !lista && !mostrarResultados && <section>
         <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Resumo por dia</h2><p className="text-sm text-slate-400">Selecione uma data para ver os pacotes.</p></div><div className="flex gap-2"><button onClick={() => setFiltroAberto(true)} className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm"><span aria-hidden="true">⏷</span> Filtro</button><button onClick={() => setNova(true)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">＋ Nova lista</button></div></div>
-        {listas.length === 0 ? <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center"><p className="text-slate-300">Ainda não há listas registradas para {usuario}.</p><button onClick={() => setNova(true)} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold">Criar primeira lista</button></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{listas.map((l) => { const entreguesDia = l.pacotes.filter((p) => ehEntregue(p.status)).length; const semSucessoDia = l.pacotes.filter((p) => p.status === "sem_sucesso").length; const pendentesDia = l.pacotes.filter((p) => p.status === "pendente").length; return <button key={l.id} onClick={() => { setListaId(l.id); setDetalheId(null); setPacote(null); }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-emerald-500"><div className="flex items-center justify-between"><h3 className="text-lg font-semibold">{dataBR(l.data)}</h3><span className="text-xs text-emerald-400">Ver dia →</span></div><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pacotes</p><b>{l.quantidade}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Entregues</p><b>{entreguesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pendentes</p><b>{pendentesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Sem sucesso</p><b>{semSucessoDia}</b></div></div></button>; })}</div>}
+        {listas.length === 0 ? <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center"><p className="text-slate-300">Ainda não há listas registradas para {usuario}.</p><button onClick={() => setNova(true)} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold">Criar primeira lista</button></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{listas.map((l) => { const entreguesDia = l.pacotes.filter((p) => ehEntregue(p.status)).length; const semSucessoDia = l.pacotes.filter((p) => p.status === "sem_sucesso").length; const pendentesDia = l.pacotes.filter((p) => p.status === "pendente").length; return <article key={l.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 hover:border-emerald-500"><div className="flex items-center justify-between gap-2"><button onClick={() => { setListaId(l.id); setDetalheId(null); setPacote(null); }} className="min-w-0 flex-1 text-left"><h3 className="text-lg font-semibold">{dataBR(l.data)}</h3><span className="text-xs text-emerald-400">Ver dia →</span></button><button disabled={!!excluindoListaId} onClick={() => void excluirLista(l)} className="shrink-0 rounded-lg border border-red-900 px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-60">{excluindoListaId === l.id ? "Excluindo..." : "Excluir lista"}</button></div><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pacotes</p><b>{l.quantidade}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Entregues</p><b>{entreguesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pendentes</p><b>{pendentesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Sem sucesso</p><b>{semSucessoDia}</b></div></div></article>; })}</div>}
       </section>}
 
       {mostrarResultados && <section><div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Resultados do filtro</h2><p className="text-sm text-slate-400">{resultadosPesquisa.length} registro(s) encontrado(s) para {usuario}</p></div><button onClick={() => setMostrarResultados(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Voltar à lista</button></div>{resultadosPesquisa.length === 0 ? <div className="rounded-xl bg-slate-900 p-5 text-sm text-slate-400">Nenhum registro corresponde aos filtros selecionados.</div> : <div className="grid gap-3 md:grid-cols-2">{resultadosPesquisa.map(({ lista: lr, pacote: p }) => <article key={lr.id + ":" + p.numero} className="flex gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3">{p.fotos[0]?.url ? <img src={p.fotos[0].url} alt="Foto do pacote" className="h-20 w-20 shrink-0 rounded-lg object-cover" /> : <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-xs text-slate-500">Sem foto</div>}<div className="min-w-0 flex-1"><p className="font-semibold">Pacote {p.numero} · {p.destinatario || p.nome || "Sem nome"}</p><p className="text-sm text-slate-300">{p.endereco || "Endereço não informado"}</p><p className="mt-1 text-xs text-slate-400">Lista: {dataBR(lr.data)} · Entrega: {dataBR(p.dataEntrega)} · Parada: {p.paradaRota || "—"}</p><p className="text-xs text-slate-400">Status: {textoStatus(p.status)}{p.motivoInsucesso ? " · " + p.motivoInsucesso : ""}</p><button onClick={() => { setListaId(lr.id); setDetalheId(p.numero); setMostrarResultados(false); }} className="mt-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm">Ver registro</button></div></article>)}</div>}</section>}
