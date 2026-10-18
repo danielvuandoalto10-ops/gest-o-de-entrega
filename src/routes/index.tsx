@@ -120,6 +120,7 @@ function Index() {
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"conectando" | "online" | "offline">("conectando");
   const [nova, setNova] = useState(false);
   const [dataLista, setDataLista] = useState(agora().data);
   const [qtd, setQtd] = useState("");
@@ -171,6 +172,37 @@ function Index() {
     setListas(dados);
     if (selecionarId) setListaId(selecionarId);
   };
+
+  useEffect(() => {
+    if (!db || !usuario) return;
+    let ativo = true;
+    const atualizarAoReceberEvento = async () => {
+      try {
+        const dados = await carregarListas(db, usuario);
+        if (ativo) {
+          setListas(dados);
+          setErro((atual) => atual.startsWith("Não foi possível sincronizar") ? "" : atual);
+        }
+      } catch (e: any) {
+        if (ativo) setErro("Não foi possível sincronizar com o servidor: " + (e?.message || "erro desconhecido"));
+      }
+    };
+    const canal = db
+      .channel("gestao-entregas-" + usuario)
+      .on("postgres_changes", { event: "*", schema: "public", table: "listas_baixas" }, atualizarAoReceberEvento)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pacotes" }, atualizarAoReceberEvento)
+      .on("postgres_changes", { event: "*", schema: "public", table: "fotos_entrega" }, atualizarAoReceberEvento)
+      .subscribe((status) => {
+        if (!ativo) return;
+        if (status === "SUBSCRIBED") setSyncStatus("online");
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setSyncStatus("offline");
+        else setSyncStatus("conectando");
+      });
+    return () => {
+      ativo = false;
+      void db.removeChannel(canal);
+    };
+  }, [db, usuario]);
 
   const criarLista = async () => {
     const n = Number(qtd);
@@ -314,6 +346,7 @@ function Index() {
     <div className="mx-auto max-w-6xl px-4 py-5">
       {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
       {carregando && <p className="mb-4 text-sm text-slate-400">Carregando registros de {usuario}...</p>}
+      {usuario && <p role="status" aria-live="polite" className={"mb-4 text-xs " + (syncStatus === "online" ? "text-emerald-400" : syncStatus === "offline" ? "text-amber-300" : "text-slate-400")}>{syncStatus === "online" ? "● Sincronização em tempo real conectada" : syncStatus === "offline" ? "● Conexão em tempo real indisponível; alterações podem demorar para aparecer" : "● Conectando à sincronização em tempo real..."}</p>}
       {!carregando && !lista && !mostrarResultados && <section>
         <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Resumo por dia</h2><p className="text-sm text-slate-400">Selecione uma data para ver os pacotes.</p></div><div className="flex gap-2"><button onClick={() => setFiltroAberto(true)} className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm"><span aria-hidden="true">⏷</span> Filtro</button><button onClick={() => setNova(true)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold">＋ Nova lista</button></div></div>
         {listas.length === 0 ? <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center"><p className="text-slate-300">Ainda não há listas registradas para {usuario}.</p><button onClick={() => setNova(true)} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold">Criar primeira lista</button></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{listas.map((l) => { const entreguesDia = l.pacotes.filter((p) => ehEntregue(p.status)).length; const semSucessoDia = l.pacotes.filter((p) => p.status === "sem_sucesso").length; const pendentesDia = l.pacotes.filter((p) => p.status === "pendente").length; return <button key={l.id} onClick={() => { setListaId(l.id); setDetalheId(null); setPacote(null); }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-emerald-500"><div className="flex items-center justify-between"><h3 className="text-lg font-semibold">{dataBR(l.data)}</h3><span className="text-xs text-emerald-400">Ver dia →</span></div><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pacotes</p><b>{l.quantidade}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Entregues</p><b>{entreguesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Pendentes</p><b>{pendentesDia}</b></div><div className="rounded-lg bg-slate-800 p-2"><p className="text-slate-400">Sem sucesso</p><b>{semSucessoDia}</b></div></div></button>; })}</div>}
