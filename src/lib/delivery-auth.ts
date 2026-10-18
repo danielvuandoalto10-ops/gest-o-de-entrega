@@ -14,10 +14,11 @@ export async function entrarComSenha(client: SupabaseClient, email: string, pass
 }
 
 export async function recuperarSenha(client: SupabaseClient) {
-  const redirectTo = typeof window !== "undefined"
-    ? `${window.location.origin}/reset-password`
-    : RECOVERY_REDIRECT;
-  const { error } = await client.auth.resetPasswordForEmail(EMAIL_AUTORIZADO, { redirectTo });
+  // Sempre usa o endereço publicado. window.location.origin pode ser localhost
+  // ou um domínio de preview e faria o e-mail apontar para o endereço errado.
+  const { error } = await client.auth.resetPasswordForEmail(EMAIL_AUTORIZADO, {
+    redirectTo: RECOVERY_REDIRECT,
+  });
   if (error) throw error;
 }
 
