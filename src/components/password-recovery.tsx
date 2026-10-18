@@ -13,23 +13,46 @@ export function PasswordRecovery() {
 
   useEffect(() => {
     let ativo = true;
-    const hash = new URLSearchParams(window.location.hash.slice(1));
-    const recovery = hash.get("type") === "recovery";
-    const hashError = hash.get("error_description");
-    if (hashError) setErro(hashError);
-    else if (!recovery) setErro("Abra o link de recuperação enviado ao seu e-mail para definir uma nova senha.");
-    // getUser waits for the auth client to process the recovery tokens and validates the account.
-    if (recovery) void supabase.auth.getUser().then(async ({ data, error }) => {
+
+    const validarUsuario = async () => {
+      const { data, error } = await supabase.auth.getUser();
       if (!ativo) return;
-      if (error) return setErro(error.message);
+      if (error) {
+        setErro(error.message);
+        return;
+      }
       if (!emailAutorizado(data.user?.email)) {
         setErro("Este e-mail não tem autorização para acessar o aplicativo.");
         await supabase.auth.signOut();
         return;
       }
       setPronto(true);
-    }).catch(error => { if (ativo) setErro(mensagemAuth(error)); });
-    return () => { ativo = false; };
+    };
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!ativo) return;
+      if (event === "PASSWORD_RECOVERY" && session) {
+        void validarUsuario();
+      }
+    });
+
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!ativo) return;
+      if (error) {
+        setErro(error.message);
+        return;
+      }
+      if (data.session) void validarUsuario();
+    });
+
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const hashError = hash.get("error_description");
+    if (hashError) setErro(hashError);
+
+    return () => {
+      ativo = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   const salvar = async () => {
@@ -46,8 +69,11 @@ export function PasswordRecovery() {
       await supabase.auth.signOut();
       window.history.replaceState(null, "", "/reset-password");
       setConcluido(true);
-    } catch (error) { setErro(mensagemAuth(error)); }
-    finally { setSalvando(false); }
+    } catch (error) {
+      setErro(mensagemAuth(error));
+    } finally {
+      setSalvando(false);
+    }
   };
 
   return <main className="auth-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
