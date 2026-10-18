@@ -341,7 +341,16 @@ function Index() {
       setErro("");
       if (!endereco.trim()) {
         setOcrProcessando(true);
-        void reconhecerTexto(novas[0]!.file!).finally(() => setOcrProcessando(false));
+        void (async () => {
+          try {
+            for (const foto of novas) {
+              if (foto.file) await reconhecerTexto(foto.file);
+              if (endereco.trim()) break;
+            }
+          } finally {
+            setOcrProcessando(false);
+          }
+        })();
       }
     }
   };
