@@ -414,15 +414,6 @@ function Index() {
     setFotosRascunho([]);
   };
 
-  const lerTextoDaFoto = async () => {
-    const arquivo = fotos.find((f) => f.file)?.file;
-    if (!arquivo) return setErro("Tire ou selecione uma foto antes de ler a etiqueta.");
-    setOcrProcessando(true);
-    await reconhecerTexto(arquivo);
-    setOcrProcessando(false);
-    if (!textoOCR.trim()) setErro("Não consegui reconhecer texto nesta foto. Você pode preencher o endereço manualmente, se necessário.");
-  };
-
   const salvar = async () => {
     if (!db || !usuario || !lista || pacote === null) return;
     if (tipoRegistro === "entregue" && !nome.trim()) return setErro("Informe quem recebeu a entrega.");
