@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
-import { entrarComSenha, recuperarSenha, emailAutorizado, mensagemAuth, RECOVERY_REDIRECT } from "@/lib/delivery-auth";
+import { entrarComSenha, recuperarSenha, emailAutorizado, mensagemAuth } from "@/lib/delivery-auth";
 
 function clientMock() {
   const auth = {
