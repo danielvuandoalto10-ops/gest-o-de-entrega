@@ -1,8 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { Button } from "@/components/ui/button";
+import { EMAIL_AUTORIZADO, entrarComSenha, recuperarSenha, mensagemAuth, emailAutorizado } from "@/lib/delivery-auth";
 
-export const Route = createFileRoute("/")({ component: Index });
+export const Route = createFileRoute("/")({
+  head: () => ({ meta: [
+    { title: "Baixas de Entrega | Acesso e registros" },
+    { name: "description", content: "Acesso autorizado aos registros e fotos de baixas de entrega." },
+    { property: "og:title", content: "Baixas de Entrega | Acesso e registros" },
+    { property: "og:description", content: "Registros e fotos de baixas de entrega com acesso protegido." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary" },
+  ] }),
+  component: Index,
+});
 
 type Foto = { id: string; dataHora: string; url: string; file?: File; storagePath?: string };
 type Pacote = {
@@ -18,7 +30,6 @@ type Pacote = {
 };
 type Lista = { id: string; data: string; quantidade: number; pacotes: Pacote[] };
 
-const EMAIL_AUTORIZADO = "daniel.vuandoalto10@gmail.com";
 const agora = () => {
   const d = new Date();
   return { data: d.toISOString().slice(0, 10), hora: d.toTimeString().slice(0, 5) };
@@ -91,6 +102,7 @@ function Index() {
   const [hora, setHora] = useState("");
   const [fotos, setFotos] = useState<Foto[]>([]);
   const [erro, setErro] = useState("");
+  const [avisoAuth, setAvisoAuth] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [nova, setNova] = useState(false);
@@ -105,11 +117,34 @@ function Index() {
   const detalhe = lista?.pacotes.find((p) => p.numero === detalheId);
 
   useEffect(() => {
+    const recoveryHash = new URLSearchParams(window.location.hash.slice(1));
+    if (recoveryHash.get("type") === "recovery" || recoveryHash.has("error_description")) {
+      window.location.replace(`/reset-password${window.location.hash}`);
+      return;
+    }
     if (!supabase) return;
     let ativo = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const email = session?.user.email?.toLowerCase() ?? null;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((evento, session) => {
+      if (evento === "PASSWORD_RECOVERY") {
+        setUsuario(null);
+        window.location.replace(`/reset-password${window.location.hash}`);
+        return;
+      }
+      if (evento !== "SIGNED_OUT") return;
+      setUsuario(null);
+      setListas([]);
+      setListaId(null);
+    });
+
+    const validarUsuario = async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (!ativo) return;
+      if (error) {
+        setUsuario(null);
+        return;
+      }
+      const email = data.user?.email?.toLowerCase() ?? null;
       if (email && email !== EMAIL_AUTORIZADO) {
         void supabase.auth.signOut();
         if (ativo) {
@@ -119,21 +154,8 @@ function Index() {
         return;
       }
       if (ativo) setUsuario(email);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_evento, session) => {
-      const email = session?.user.email?.toLowerCase() ?? null;
-      if (email && email !== EMAIL_AUTORIZADO) {
-        setUsuario(null);
-        setErro("Este e-mail não tem autorização para acessar o aplicativo.");
-        return;
-      }
-      setUsuario(email);
-      if (!email) {
-        setListas([]);
-        setListaId(null);
-      }
-    });
+    };
+    void validarUsuario().catch(error => { if (ativo) setErro(mensagemAuth(error)); });
 
     return () => {
       ativo = false;
@@ -153,33 +175,35 @@ function Index() {
       .finally(() => setCarregando(false));
   }, [usuario]);
 
-  const entrar = async (email: string, senha: string, modo: "entrar" | "criar") => {
-    if (!supabase) return setErro("O aplicativo ainda não está conectado ao Supabase.");
-    if (email.trim().toLowerCase() !== EMAIL_AUTORIZADO) {
-      return setErro("Somente o e-mail autorizado pode acessar este aplicativo.");
-    }
-    if (senha.length < 8) return setErro("A senha precisa ter pelo menos 8 caracteres.");
-
+  const entrar = async (email: string, senha: string) => {
     setSalvando(true);
     setErro("");
+    setAvisoAuth("");
     try {
-      if (modo === "criar") {
-        const { data, error } = await supabase.auth.signUp({ email: EMAIL_AUTORIZADO, password: senha });
-        if (error) throw error;
-        if (data.session) {
-          setUsuario(EMAIL_AUTORIZADO);
-        } else {
-          setErro("Cadastro iniciado. Confira seu e-mail para confirmar a conta e depois entre no aplicativo.");
-        }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: EMAIL_AUTORIZADO, password: senha });
-        if (error) throw error;
+      await entrarComSenha(supabase, email, senha);
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      if (!emailAutorizado(data.user?.email)) {
+        await supabase.auth.signOut();
+        throw new Error("Este e-mail não tem autorização para acessar o aplicativo.");
       }
-    } catch (e: any) {
-      setErro(e.message || "Não foi possível autenticar. Confira os dados e tente novamente.");
+      setUsuario(EMAIL_AUTORIZADO);
+    } catch (error) {
+      setErro(mensagemAuth(error));
     } finally {
       setSalvando(false);
     }
+  };
+
+  const esqueciSenha = async () => {
+    setSalvando(true);
+    setErro("");
+    setAvisoAuth("");
+    try {
+      await recuperarSenha(supabase);
+      setAvisoAuth("Solicitação enviada. Confira seu e-mail e a pasta de spam para recuperar a senha.");
+    } catch (error) { setErro(mensagemAuth(error)); }
+    finally { setSalvando(false); }
   };
 
   const sair = async () => {
@@ -356,7 +380,7 @@ function Index() {
     }
   };
 
-  if (!usuario) return <Login entrar={entrar} erro={erro} salvando={salvando} />;
+  if (!usuario) return <Login entrar={entrar} esqueciSenha={esqueciSenha} erro={erro} aviso={avisoAuth} salvando={salvando} />;
 
   return <main className="min-h-screen bg-slate-950 text-white">
     <header className="border-b border-slate-800 bg-slate-900 px-4 py-4"><div className="mx-auto flex max-w-6xl justify-between"><div><h1 className="text-2xl font-bold">Baixa de Entregas</h1><p className="text-sm text-slate-400">Usuário: {usuario}</p></div><button onClick={sair} className="rounded-lg border border-slate-700 px-3 py-2">Sair</button></div></header>
@@ -376,34 +400,36 @@ function Index() {
 
 function Login({
   entrar,
+  esqueciSenha,
   erro,
+  aviso,
   salvando,
 }: {
-  entrar: (email: string, senha: string, modo: "entrar" | "criar") => void;
+  entrar: (email: string, senha: string) => void;
+  esqueciSenha: () => void;
   erro: string;
+  aviso: string;
   salvando: boolean;
 }) {
   const [senha, setSenha] = useState("");
-  const [modo, setModo] = useState<"entrar" | "criar">("entrar");
 
-  return <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-    <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8">
+  return <main className="auth-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+    <section className="w-full max-w-md rounded-lg border border-border bg-card p-8">
       <h1 className="mb-2 text-center text-3xl font-bold">Baixa de Entregas</h1>
-      <p className="mb-6 text-center text-slate-400">Acesso protegido por e-mail e senha.</p>
-      {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
-      <label className="block text-sm text-slate-300">E-mail autorizado
-        <input value={EMAIL_AUTORIZADO} readOnly className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3 text-slate-300" />
+      <p className="mb-6 text-center text-muted-foreground">Acesso protegido por e-mail e senha.</p>
+      {erro && <div role="alert" className="mb-4 break-words rounded-lg border border-destructive p-3 text-sm text-destructive">{erro}</div>}
+      {aviso && <p role="status" className="mb-4 text-sm text-foreground">{aviso}</p>}
+      <form onSubmit={event => { event.preventDefault(); entrar(EMAIL_AUTORIZADO, senha); }}>
+      <label className="block text-sm">E-mail autorizado
+        <input type="email" autoComplete="username" value={EMAIL_AUTORIZADO} readOnly className="mt-1 w-full rounded-lg border border-input bg-secondary p-3" />
       </label>
-      <label className="mt-4 block text-sm text-slate-300">Senha
-        <input type="password" autoComplete={modo === "criar" ? "new-password" : "current-password"} value={senha} onChange={e => setSenha(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 p-3" placeholder="Mínimo de 8 caracteres" />
+      <label className="mt-4 block text-sm">Senha
+        <input required type="password" autoComplete="current-password" value={senha} onChange={e => setSenha(e.target.value)} className="mt-1 w-full rounded-lg border border-input bg-secondary p-3" />
       </label>
-      <button disabled={salvando || senha.length < 8} onClick={() => entrar(EMAIL_AUTORIZADO, senha, modo)} className="mt-5 w-full rounded-xl bg-emerald-600 px-5 py-3 font-bold disabled:opacity-50">
-        {salvando ? "Aguarde..." : modo === "criar" ? "Criar meu acesso" : "Entrar"}
-      </button>
-      <button disabled={salvando} onClick={() => setModo(modo === "entrar" ? "criar" : "entrar")} className="mt-4 w-full text-sm text-emerald-400 disabled:opacity-50">
-        {modo === "entrar" ? "Primeiro acesso? Criar senha" : "Já tenho conta. Voltar para entrar"}
-      </button>
-      <p className="mt-5 text-center text-xs text-slate-500">Somente o e-mail autorizado tem permissão para acessar os registros e as fotos.</p>
+      <Button type="submit" disabled={salvando || !senha} className="mt-5 h-12 w-full font-bold">{salvando ? "Aguarde..." : "Entrar"}</Button>
+      </form>
+      <Button type="button" variant="link" disabled={salvando} onClick={esqueciSenha} className="mt-4 w-full">Esqueci minha senha</Button>
+      <p className="mt-5 text-center text-xs text-muted-foreground">Somente o e-mail autorizado tem permissão para acessar os registros e as fotos.</p>
     </section>
   </main>;
 }
