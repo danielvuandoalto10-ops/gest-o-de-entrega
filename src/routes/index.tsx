@@ -195,6 +195,7 @@ function Index() {
     setSalvando(true); setErro("");
     const arquivosEnviados: string[] = [];
     const fotosInseridas: string[] = [];
+    let registroConcluido = false;
     try {
       for (let i = 0; i < fotos.length; i++) {
         const f = fotos[i]!;
@@ -225,12 +226,17 @@ function Index() {
       const { data: atualizado, error: pe } = await db.from("pacotes").update(patch).eq("id", atual.id).eq("status", "pendente").select("id").maybeSingle();
       if (pe) throw pe;
       if (!atualizado) throw new Error("O pacote não foi atualizado. Atualize a página e tente novamente.");
+      registroConcluido = true;
       setPacote(null); setFotos([]); setNome(""); setDestinatario(""); setEndereco(""); setParadaRota(""); setObservacao(""); setTextoOCR("");
       await atualizar(lista.id);
     } catch (e: any) {
-      if (fotosInseridas.length) await db.from("fotos_entrega").delete().in("id", fotosInseridas);
-      if (arquivosEnviados.length) await db.storage.from("fotos-entregas").remove(arquivosEnviados);
-      setErro("Não foi possível salvar o registro: " + e.message);
+      if (!registroConcluido) {
+        if (fotosInseridas.length) await db.from("fotos_entrega").delete().in("id", fotosInseridas);
+        if (arquivosEnviados.length) await db.storage.from("fotos-entregas").remove(arquivosEnviados);
+      }
+      setErro(registroConcluido
+        ? "Registro salvo, mas a tela não atualizou. Atualize a página. Motivo: " + e.message
+        : "Não foi possível salvar o registro: " + e.message);
     } finally { setSalvando(false); }
   };
 
