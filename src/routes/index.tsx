@@ -259,12 +259,12 @@ function Index() {
   if (!usuario) return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5">
     <section className="w-full max-w-md">
       <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">✓</div><h1 className="text-2xl font-bold">Baixas sem Entrega</h1><p className="mt-2 text-sm text-slate-400">Selecione seu usuário para continuar</p></div>
-      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <button key={u} onClick={() => setUsuario(u)} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 text-lg font-semibold transition hover:border-emerald-500 hover:bg-slate-800">{u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span></button>)}</div>
+      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <button key={u} onClick={() => { limparFiltros(); setUsuario(u); }} className="rounded-2xl border border-slate-700 bg-slate-900 p-6 text-lg font-semibold transition hover:border-emerald-500 hover:bg-slate-800">{u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span></button>)}</div>
     </section>
   </main>;
 
   return <main className="min-h-screen bg-slate-950 text-white">
-    <header className="border-b border-slate-800 bg-slate-900 px-4 py-3"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div><h1 className="text-xl font-bold">Baixas sem Entrega</h1><p className="text-sm text-slate-400">Painel de {usuario}</p></div><button onClick={() => { setUsuario(null); setListas([]); setListaId(null); setPacote(null); setDetalheId(null); setFiltroAberto(false); setMostrarResultados(false); setErro(""); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Trocar usuário</button></div></header>
+    <header className="border-b border-slate-800 bg-slate-900 px-4 py-3"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div><h1 className="text-xl font-bold">Baixas sem Entrega</h1><p className="text-sm text-slate-400">Painel de {usuario}</p></div><button onClick={() => { limparFiltros(); setUsuario(null); setListas([]); setListaId(null); setPacote(null); setDetalheId(null); setFiltroAberto(false); setMostrarResultados(false); setErro(""); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Trocar usuário</button></div></header>
     <div className="mx-auto max-w-6xl px-4 py-5">
       {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
       {carregando && <p className="mb-4 text-sm text-slate-400">Carregando registros de {usuario}...</p>}
