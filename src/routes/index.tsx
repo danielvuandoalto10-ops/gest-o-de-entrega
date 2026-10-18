@@ -112,7 +112,7 @@ function Index() {
     const carregarFotosPerfil = async () => {
       const pares = await Promise.all((["Daniel", "Rafael"] as Usuario[]).map(async (u) => {
         const cliente = criarSupabaseParaUsuario(u);
-        const { data, error } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 3600);
+        const { data, error } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 604800);
         return [u, !error && data?.signedUrl ? data.signedUrl : null] as const;
       }));
       if (ativo) setFotosPerfil((atuais) => ({ ...atuais, ...Object.fromEntries(pares) }) as Record<Usuario, string | null>);
@@ -420,7 +420,7 @@ function Index() {
         { contentType: arquivo.type, upsert: true },
       );
       if (error) throw error;
-      const { data, error: urlError } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 3600);
+      const { data, error: urlError } = await cliente.storage.from("fotos-entregas").createSignedUrl(u + "/profile/avatar", 604800);
       if (urlError || !data?.signedUrl) throw urlError || new Error("A foto foi enviada, mas não foi possível gerar a visualização.");
       setFotosPerfil((v) => ({ ...v, [u]: data.signedUrl }));
       URL.revokeObjectURL(fotoPerfilPendente.previa);
