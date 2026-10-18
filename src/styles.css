@@ -185,6 +185,17 @@ body {
 }
 
 
-.user-themed {
-  font-family: var(--user-font, "Poppins"), sans-serif;
+/* A fonte precisa ser aplicada aos descendentes também: utilitários do Tailwind
+   definem font-family diretamente em muitos elementos e impediam a troca visual. */
+.user-themed,
+.user-themed * {
+  font-family: var(--user-font, "Poppins"), Arial, sans-serif !important;
+}
+
+/* Mantém os controles de código com espaçamento monoespaçado. */
+.user-themed code,
+.user-themed pre,
+.user-themed kbd,
+.user-themed samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
 }
