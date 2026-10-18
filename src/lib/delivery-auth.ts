@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const EMAIL_AUTORIZADO = "daniel.vuandoalto10@gmail.com";
-export const RECOVERY_REDIRECT = "https://hello-world-tool-90.lovable.app";
+export const RECOVERY_REDIRECT = "https://hello-world-tool-90.lovable.app/reset-password";
 
 export function emailAutorizado(email: string | undefined | null) {
   return email?.trim().toLowerCase() === EMAIL_AUTORIZADO;
@@ -14,7 +14,10 @@ export async function entrarComSenha(client: SupabaseClient, email: string, pass
 }
 
 export async function recuperarSenha(client: SupabaseClient) {
-  const { error } = await client.auth.resetPasswordForEmail(EMAIL_AUTORIZADO, { redirectTo: RECOVERY_REDIRECT });
+  const redirectTo = typeof window !== "undefined"
+    ? `${window.location.origin}/reset-password`
+    : RECOVERY_REDIRECT;
+  const { error } = await client.auth.resetPasswordForEmail(EMAIL_AUTORIZADO, { redirectTo });
   if (error) throw error;
 }
 
