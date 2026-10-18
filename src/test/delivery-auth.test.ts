@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
-import { entrarComSenha, recuperarSenha, emailAutorizado, mensagemAuth } from "@/lib/delivery-auth";
+import { entrarComSenha, recuperarSenha, emailAutorizado, mensagemAuth, RECOVERY_REDIRECT } from "@/lib/delivery-auth";
 
 function clientMock() {
   const auth = {
@@ -41,7 +41,7 @@ describe("Delivery authentication", () => {
     const { client, auth } = clientMock();
     await recuperarSenha(client);
     expect(auth.resetPasswordForEmail).toHaveBeenCalledWith("daniel.vuandoalto10@gmail.com", {
-      redirectTo: "https://hello-world-tool-90.lovable.app",
+      redirectTo: "https://hello-world-tool-90.lovable.app/reset-password",
     });
   });
 
