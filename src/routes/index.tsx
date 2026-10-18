@@ -233,8 +233,8 @@ function Index() {
       setTextoOCR(texto);
       const linhas = texto.split(/\n+/).map((linha) => linha.trim()).filter(Boolean);
       const indiceEndereco = linhas.findIndex((linha) => /\b(rua|r\.?|avenida|av\.?|travessa|tv\.?|alameda|estrada|rodovia|pra[cç]a|cep)\b/i.test(linha) || /\b\d{5}-?\d{3}\b/.test(linha));
-      if (!destinatario.trim()) {
-        const linhaNome = linhas.slice(0, indiceEndereco >= 0 ? indiceEndereco : 1).find((linha) => linha.length > 2 && !/\b(cep|pedido|nota fiscal|remetente|destinat[aá]rio)\b/i.test(linha));
+      if (!destinatario.trim() && indiceEndereco > 0) {
+        const linhaNome = linhas.slice(0, indiceEndereco).find((linha) => linha.length > 2 && !/\b(cep|pedido|nota fiscal|remetente|destinat[aá]rio)\b/i.test(linha));
         if (linhaNome) setDestinatario(linhaNome);
       }
       if (!endereco.trim() && indiceEndereco >= 0) setEndereco(linhas.slice(indiceEndereco).join(", "));
