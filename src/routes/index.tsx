@@ -53,16 +53,35 @@ async function carregarListas(db: ReturnType<typeof criarSupabaseParaUsuario>, u
   const { data: fs, error: fe } = pids.length ? await db.from("fotos_entrega").select("id,pacote_id,storage_path,captured_at").in("pacote_id", pids).order("captured_at") : { data: [], error: null };
   if (fe) throw fe;
   const fotoMap = new Map<string, Foto[]>();
-  for (const f of fs ?? []) {
-    let url = "";
-    try { const signed = await db.storage.from("fotos-entregas").createSignedUrl(f.storage_path, 86400); if (!signed.error) url = signed.data.signedUrl; } catch {}
-    const arr = fotoMap.get(f.pacote_id) ?? [];
-    arr.push({ id: f.id, dataHora: f.captured_at, url, storagePath: f.storage_path });
-    fotoMap.set(f.pacote_id, arr);
+  // Gera URLs assinadas em pequenos lotes paralelos, evitando uma espera sequencial por foto.
+  const fotosRows = fs ?? [];
+  for (let i = 0; i < fotosRows.length; i += 25) {
+    const lote = await Promise.all(fotosRows.slice(i, i + 25).map(async (f) => {
+      let url = "";
+      try {
+        const signed = await db.storage.from("fotos-entregas").createSignedUrl(f.storage_path, 86400);
+        if (!signed.error) url = signed.data.signedUrl;
+      } catch {}
+      return { pacoteId: f.pacote_id, foto: { id: f.id, dataHora: f.captured_at, url, storagePath: f.storage_path } as Foto };
+    }));
+    for (const item of lote) {
+      const arr = fotoMap.get(item.pacoteId) ?? [];
+      arr.push(item.foto);
+      fotoMap.set(item.pacoteId, arr);
+    }
   }
+
+  // Agrupa os pacotes uma única vez, evitando filtrar todos eles para cada lista.
+  const pacotesPorLista = new Map<string, NonNullable<typeof ps>[number][]>();
+  for (const p of ps ?? []) {
+    const arr = pacotesPorLista.get(p.lista_id) ?? [];
+    arr.push(p);
+    pacotesPorLista.set(p.lista_id, arr);
+  }
+
   return rows.map((l) => ({
     id: l.id, data: l.data_baixas, quantidade: l.quantidade,
-    pacotes: (ps ?? []).filter((p) => p.lista_id === l.id).map((p) => ({
+    pacotes: (pacotesPorLista.get(l.id) ?? []).map((p) => ({
       id: p.id, numero: p.numero, nome: p.nome_recebedor ?? "", destinatario: p.nome_destinatario ?? "",
       endereco: p.endereco ?? "", paradaRota: p.parada_rota ?? "", dataEntrega: p.data_entrega ?? "",
       horaEntrega: p.hora_entrega?.slice(0, 5) ?? "", fotos: fotoMap.get(p.id) ?? [],
