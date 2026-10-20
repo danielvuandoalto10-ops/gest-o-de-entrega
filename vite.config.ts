@@ -6,66 +6,32 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-const conferidoSwipePlugin = {
-  name: "conferido-parada-swipe",
+const conferidoPacoteSwipePlugin = {
+  name: "conferido-pacote-navegacao",
   transform(code: string, id: string) {
     if (!id.endsWith("/src/routes/index.tsx")) return null;
-    const marker = `  const corAtiva = coresUsuario[usuario];`;
-    const component = `
-  function NavegacaoConferido({ pacotes, onAbrir }: { pacotes: Pacote[]; onAbrir: (numero: number) => void }) {
-    const grupos = useMemo(() => {
-      const mapa = new Map<string, Pacote[]>();
-      for (const p of pacotes) {
-        const chave = p.paradaRota.trim() || "Sem parada informada";
-        const atual = mapa.get(chave) ?? [];
-        atual.push(p);
-        mapa.set(chave, atual);
-      }
-      return Array.from(mapa, ([nome, itens]) => ({ nome, itens }));
-    }, [pacotes]);
-    const [indice, setIndice] = useState(0);
-    const inicioToque = useRef<number | null>(null);
-    useEffect(() => { if (indice >= grupos.length) setIndice(Math.max(0, grupos.length - 1)); }, [indice, grupos.length]);
-    if (!grupos.length) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm text-slate-400">Nenhuma parada conferida.</div>;
-    const parada = grupos[indice]!;
-    const anterior = () => setIndice((v) => Math.max(0, v - 1));
-    const proxima = () => setIndice((v) => Math.min(grupos.length - 1, v + 1));
-    return <div>
-      <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3">
-        <button onClick={anterior} disabled={indice === 0} aria-label="Parada anterior" className="rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-30">←</button>
-        <div className="min-w-0 text-center"><p className="text-xs text-slate-400">Parada {indice + 1} de {grupos.length}</p><p className="truncate font-semibold">{parada.nome}</p></div>
-        <button onClick={proxima} disabled={indice === grupos.length - 1} aria-label="Próxima parada" className="rounded-lg border border-slate-700 px-3 py-2 text-sm disabled:opacity-30">→</button>
-      </div>
-      <div
-        className="overflow-hidden touch-pan-y"
-        onTouchStart={(e) => { inicioToque.current = e.changedTouches[0]?.clientX ?? null; }}
-        onTouchEnd={(e) => {
-          const inicio = inicioToque.current;
-          const fim = e.changedTouches[0]?.clientX ?? null;
-          inicioToque.current = null;
-          if (inicio === null || fim === null) return;
-          const deslocamento = fim - inicio;
-          if (Math.abs(deslocamento) >= 55) { if (deslocamento < 0) proxima(); else anterior(); }
-        }}
-      >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">{parada.itens.map((p) => <button key={p.id ?? p.numero} onClick={() => onAbrir(p.numero)} className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-left hover:border-emerald-500"><b>Pacote {p.numero}</b><p className="mt-1 truncate text-sm text-slate-300">{p.destinatario || p.nome || "Sem nome"}</p><p className="mt-2 text-xs text-slate-400">{textoStatus(p.status)}</p>{p.motivoInsucesso && <p className="mt-1 text-xs text-amber-300">{p.motivoInsucesso}</p>}<p className="mt-1 text-xs text-slate-500">{p.fotos.length} foto(s)</p></button>)}</div>
-      </div>
-    </div>;
-  }
 
-`;
-    if (!code.includes(marker)) return null;
-    const withComponent = code.includes("function NavegacaoConferido") ? code : code.replace(marker, component + marker);
-    const start = withComponent.indexOf('<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">{(aba === "pendentes"');
-    if (start < 0) return { code: withComponent, map: null };
-    const endMarker = '</div></section>}';
-    const end = withComponent.indexOf(endMarker, start);
-    if (end < 0) return { code: withComponent, map: null };
-    const replacement = '<div>' +
-      '{aba === "conferidos" ? <NavegacaoConferido pacotes={conferidos} onAbrir={(n) => setDetalheId(n)} /> : ' +
-      '<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">{(aba === "pendentes" ? pendentes : aba === "entregues" ? entregues : insucessos).map((p) => <button key={p.id ?? p.numero} onClick={() => p.status === "pendente" ? abrirPacote(p.numero) : setDetalheId(p.numero)} className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-left hover:border-emerald-500"><b>Pacote {p.numero}</b><p className="mt-1 truncate text-sm text-slate-300">{p.destinatario || p.nome || "Sem nome"}</p><p className="mt-2 text-xs text-slate-400">{textoStatus(p.status)}</p>{p.motivoInsucesso && <p className="mt-1 text-xs text-amber-300">{p.motivoInsucesso}</p>}<p className="mt-1 text-xs text-slate-500">{p.fotos.length} foto(s)</p></button>)}</div>}' +
-      '</div></section>}';
-    return { code: withComponent.slice(0, start) + replacement + withComponent.slice(end + endMarker.length), map: null };
+    const stateMarker = "  const [erro, setErro] = useState(\"\");";
+    const stateInjection = `  const inicioSwipeDetalheRef = useRef<number | null>(null);\n`;
+    const withSwipeState = code.includes("inicioSwipeDetalheRef")
+      ? code
+      : code.replace(stateMarker, stateMarker + "\n" + stateInjection);
+
+    const helperMarker = `  const corAtiva = coresUsuario[usuario];`;
+    const helper = `  const indicePacoteConferido = aba === "conferidos" && detalheId !== null ? conferidos.findIndex((p) => p.numero === detalheId) : -1;\n  const pacoteAnteriorConferido = indicePacoteConferido > 0 ? conferidos[indicePacoteConferido - 1] : null;\n  const proximoPacoteConferido = indicePacoteConferido >= 0 && indicePacoteConferido < conferidos.length - 1 ? conferidos[indicePacoteConferido + 1] : null;\n\n`;
+    const withHelpers = withSwipeState.includes("indicePacoteConferido")
+      ? withSwipeState
+      : withSwipeState.replace(helperMarker, helper + helperMarker);
+
+    const sectionMarker = '<section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-5">';
+    const sectionReplacement = `<section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-5"\n        onTouchStart={(e) => { if (aba === "conferidos") inicioSwipeDetalheRef.current = e.changedTouches[0]?.clientX ?? null; }}\n        onTouchEnd={(e) => {\n          if (aba !== "conferidos") return;\n          const inicio = inicioSwipeDetalheRef.current;\n          const fim = e.changedTouches[0]?.clientX ?? null;\n          inicioSwipeDetalheRef.current = null;\n          if (inicio === null || fim === null) return;\n          const deslocamento = fim - inicio;\n          if (Math.abs(deslocamento) < 55) return;\n          if (deslocamento < 0 && proximoPacoteConferido) setDetalheId(proximoPacoteConferido.numero);\n          if (deslocamento > 0 && pacoteAnteriorConferido) setDetalheId(pacoteAnteriorConferido.numero);\n        }}>`;
+    const withSection = withHelpers.replace(sectionMarker, sectionReplacement);
+
+    const titleMarker = '<h2 className="mb-4 text-2xl font-bold">Pacote {detalhe.numero}</h2>';
+    const navigation = `<h2 className="mb-3 text-2xl font-bold">Pacote {detalhe.numero}</h2>\n          {aba === "conferidos" && indicePacoteConferido >= 0 && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3" aria-label="Navegação entre pacotes conferidos">\n            <button type="button" onClick={() => pacoteAnteriorConferido && setDetalheId(pacoteAnteriorConferido.numero)} disabled={!pacoteAnteriorConferido} aria-label="Pacote anterior" className="rounded-lg border border-slate-700 px-4 py-2 text-lg disabled:cursor-not-allowed disabled:opacity-30">←</button>\n            <p className="text-center text-sm text-slate-300"><span className="font-semibold">Pacote {indicePacoteConferido + 1} de {conferidos.length}</span><br /><span className="text-xs text-slate-500">Deslize para trocar de pacote</span></p>\n            <button type="button" onClick={() => proximoPacoteConferido && setDetalheId(proximoPacoteConferido.numero)} disabled={!proximoPacoteConferido} aria-label="Próximo pacote" className="rounded-lg border border-slate-700 px-4 py-2 text-lg disabled:cursor-not-allowed disabled:opacity-30">→</button>\n          </div>`;
+    const finalCode = withSection.replace(titleMarker, navigation);
+    if (finalCode === code) return null;
+    return { code: finalCode, map: null };
   },
 };
 
@@ -73,5 +39,5 @@ export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
-  vite: { plugins: [conferidoSwipePlugin] },
+  vite: { plugins: [conferidoPacoteSwipePlugin] },
 });
