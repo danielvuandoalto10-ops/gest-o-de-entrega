@@ -53,21 +53,29 @@ async function carregarListas(db: ReturnType<typeof criarSupabaseParaUsuario>, u
   const { data: fs, error: fe } = pids.length ? await db.from("fotos_entrega").select("id,pacote_id,storage_path,captured_at").in("pacote_id", pids).order("captured_at") : { data: [], error: null };
   if (fe) throw fe;
   const fotoMap = new Map<string, Foto[]>();
-  // Gera URLs assinadas em pequenos lotes paralelos, evitando uma espera sequencial por foto.
+  // Uma chamada em lote reduz as requisições para recuperar fotos de todas as listas.
   const fotosRows = fs ?? [];
-  for (let i = 0; i < fotosRows.length; i += 25) {
-    const lote = await Promise.all(fotosRows.slice(i, i + 25).map(async (f) => {
-      let url = "";
-      try {
-        const signed = await db.storage.from("fotos-entregas").createSignedUrl(f.storage_path, 86400);
-        if (!signed.error) url = signed.data.signedUrl;
-      } catch {}
-      return { pacoteId: f.pacote_id, foto: { id: f.id, dataHora: f.captured_at, url, storagePath: f.storage_path } as Foto };
-    }));
-    for (const item of lote) {
-      const arr = fotoMap.get(item.pacoteId) ?? [];
-      arr.push(item.foto);
-      fotoMap.set(item.pacoteId, arr);
+  for (let i = 0; i < fotosRows.length; i += 100) {
+    const lote = fotosRows.slice(i, i + 100);
+    let urlsPorCaminho = new Map<string, string>();
+    try {
+      const { data: assinadas, error: erroAssinatura } = await db.storage
+        .from("fotos-entregas")
+        .createSignedUrls(lote.map((f) => f.storage_path), 86400);
+      if (!erroAssinatura) {
+        const pares: [string, string][] = [];
+        for (const assinada of assinadas ?? []) {
+          if (assinada.path && assinada.signedUrl) pares.push([assinada.path, assinada.signedUrl]);
+        }
+        urlsPorCaminho = new Map(pares);
+      }
+    } catch {
+      // Falha temporária ao assinar fotos não deve impedir o carregamento dos pacotes.
+    }
+    for (const f of lote) {
+      const arr = fotoMap.get(f.pacote_id) ?? [];
+      arr.push({ id: f.id, dataHora: f.captured_at, url: urlsPorCaminho.get(f.storage_path) ?? "", storagePath: f.storage_path });
+      fotoMap.set(f.pacote_id, arr);
     }
   }
 
@@ -190,6 +198,7 @@ function Index() {
   const [mostrarCampoEndereco, setMostrarCampoEndereco] = useState(false);
   const videoCameraRef = useRef<HTMLVideoElement | null>(null);
   const streamCameraRef = useRef<MediaStream | null>(null);
+  const salvandoRegistroRef = useRef(false);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregando, setCarregando] = useState(false);
@@ -301,22 +310,41 @@ function Index() {
   useEffect(() => {
     if (!db || !usuario) return;
     let ativo = true;
+    let temporizador: number | undefined;
+    let atualizandoAgora = false;
+    let atualizarNovamente = false;
     const atualizarAoReceberEvento = async () => {
+      if (!ativo) return;
+      if (atualizandoAgora) {
+        atualizarNovamente = true;
+        return;
+      }
+      atualizandoAgora = true;
       try {
-        const dados = await carregarListas(db, usuario);
-        if (ativo) {
-          setListas(dados);
-          setErro((atual) => atual.startsWith("Não foi possível sincronizar") ? "" : atual);
-        }
+        do {
+          atualizarNovamente = false;
+          const dados = await carregarListas(db, usuario);
+          if (ativo) {
+            setListas(dados);
+            setErro((atual) => atual.startsWith("Não foi possível sincronizar") ? "" : atual);
+          }
+        } while (ativo && atualizarNovamente);
       } catch (e: any) {
         if (ativo) setErro("Não foi possível sincronizar com o servidor: " + (e?.message || "erro desconhecido"));
+      } finally {
+        atualizandoAgora = false;
       }
+    };
+    // Agrupa eventos de fotos e pacote numa única recarga e impede recargas concorrentes.
+    const agendarAtualizacao = () => {
+      if (temporizador !== undefined) window.clearTimeout(temporizador);
+      temporizador = window.setTimeout(() => { void atualizarAoReceberEvento(); }, 300);
     };
     const canal = db
       .channel("gestao-entregas-" + usuario)
-      .on("postgres_changes", { event: "*", schema: "public", table: "listas_baixas" }, atualizarAoReceberEvento)
-      .on("postgres_changes", { event: "*", schema: "public", table: "pacotes" }, atualizarAoReceberEvento)
-      .on("postgres_changes", { event: "*", schema: "public", table: "fotos_entrega" }, atualizarAoReceberEvento)
+      .on("postgres_changes", { event: "*", schema: "public", table: "listas_baixas" }, agendarAtualizacao)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pacotes" }, agendarAtualizacao)
+      .on("postgres_changes", { event: "*", schema: "public", table: "fotos_entrega" }, agendarAtualizacao)
       .subscribe((status) => {
         if (!ativo) return;
         if (status === "SUBSCRIBED") setSyncStatus("online");
@@ -325,6 +353,7 @@ function Index() {
       });
     return () => {
       ativo = false;
+      if (temporizador !== undefined) window.clearTimeout(temporizador);
       void db.removeChannel(canal);
     };
   }, [db, usuario]);
@@ -492,24 +521,50 @@ function Index() {
     if (tipoRegistro === "sem_sucesso" && motivo === "Outro motivo" && !observacao.trim()) return setErro("Descreva o motivo da tentativa sem sucesso.");
     const atual = lista.pacotes.find((p) => p.numero === pacote);
     if (!atual?.id || atual.status !== "pendente") return setErro("Este pacote não está mais pendente.");
-    setSalvando(true); setErro("");
+    // Bloqueia duplo toque no celular antes que o estado React seja atualizado.
+    if (salvandoRegistroRef.current) return;
+    salvandoRegistroRef.current = true;
+    setSalvando(true);
+    setErro("");
     const arquivosEnviados: string[] = [];
     const fotosInseridas: string[] = [];
     let registroConcluido = false;
+    let resultadoDoBancoIncerto = false;
+    const tentativaEm = new Date().toISOString();
+    const arquivosNovos = fotos.filter((f) => !!f.file);
     try {
-      for (let i = 0; i < fotos.length; i++) {
-        const f = fotos[i]!;
-        if (!f.file) continue;
-        const ext = f.file.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
-        const path = usuario + "/" + lista.id + "/pacote-" + pacote + "-" + Date.now() + "-" + i + "-" + crypto.randomUUID() + "." + ext;
-        const { error: ue } = await db.storage.from("fotos-entregas").upload(path, f.file, { contentType: f.file.type, upsert: false });
-        if (ue) throw ue;
-        arquivosEnviados.push(path);
-        const { data: fotoRow, error: fe } = await db.from("fotos_entrega").insert({ pacote_id: atual.id, storage_path: path, captured_at: f.dataHora }).select("id").single();
-        if (fe) throw fe;
-        fotosInseridas.push(fotoRow.id);
+      // Limita a concorrência a 3 fotos para não sobrecarregar celulares ou conexões lentas.
+      for (let i = 0; i < arquivosNovos.length; i += 3) {
+        const lote = arquivosNovos.slice(i, i + 3);
+        const resultados = await Promise.allSettled(lote.map(async (f, indice) => {
+          const arquivo = f.file!;
+          const ext = arquivo.type.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+          const path = usuario + "/" + lista.id + "/pacote-" + pacote + "-" + crypto.randomUUID() + "-" + (i + indice) + "." + ext;
+          const { error: erroUpload } = await db.storage.from("fotos-entregas").upload(path, arquivo, { contentType: arquivo.type, upsert: false });
+          if (erroUpload) throw erroUpload;
+          return { path, captured_at: f.dataHora, pacote_id: atual.id };
+        }));
+        for (const resultado of resultados) {
+          if (resultado.status === "fulfilled") arquivosEnviados.push(resultado.value.path);
+        }
+        const falha = resultados.find((r): r is PromiseRejectedResult => r.status === "rejected");
+        if (falha) throw falha.reason;
       }
-      const tentativaEm = new Date().toISOString();
+
+      // Grava os metadados de todas as fotos em uma única operação.
+      if (arquivosEnviados.length) {
+        const metadados = arquivosNovos.map((f, i) => ({
+          pacote_id: atual.id,
+          storage_path: arquivosEnviados[i],
+          captured_at: f.dataHora,
+        }));
+        const { data: linhasFotos, error: erroFotos } = await db.from("fotos_entrega").insert(metadados).select("id");
+        if (erroFotos) throw erroFotos;
+        if (!linhasFotos || linhasFotos.length !== metadados.length) throw new Error("Nem todas as fotos foram confirmadas pelo banco de dados.");
+        fotosInseridas.push(...linhasFotos.map((f) => f.id));
+      }
+
+      const statusFinal = tipoRegistro === "sem_sucesso" ? "sem_sucesso" : "registrado";
       const patch = {
         nome_recebedor: tipoRegistro === "entregue" ? nome.trim() : null,
         nome_destinatario: destinatario.trim() || null,
@@ -517,27 +572,60 @@ function Index() {
         parada_rota: paradaRota.trim() || null,
         data_entrega: data || null,
         hora_entrega: hora || null,
-        status: tipoRegistro === "sem_sucesso" ? "sem_sucesso" : "registrado",
+        status: statusFinal,
         registrado_por: usuario,
         motivo_insucesso: tipoRegistro === "sem_sucesso" ? motivo : null,
         observacao_insucesso: tipoRegistro === "sem_sucesso" ? (observacao.trim() || null) : null,
         tentativa_em: tentativaEm,
       };
-      const { data: atualizado, error: pe } = await db.from("pacotes").update(patch).eq("id", atual.id).eq("status", "pendente").select("id").maybeSingle();
-      if (pe) throw pe;
-      if (!atualizado) throw new Error("O pacote não foi atualizado. Atualize a página e tente novamente.");
-      registroConcluido = true;
+      const { data: atualizado, error: erroAtualizacao } = await db.from("pacotes")
+        .update(patch).eq("id", atual.id).eq("status", "pendente").select("id").maybeSingle();
+
+      if (erroAtualizacao || !atualizado) {
+        // Uma queda de conexão pode ocorrer depois de o servidor efetivar o UPDATE.
+        // Confere o estado real antes de apagar fotos ou orientar uma nova tentativa.
+        const { data: estado, error: erroVerificacao } = await db.from("pacotes")
+          .select("id,status,registrado_por,tentativa_em").eq("id", atual.id).maybeSingle();
+        if (erroVerificacao) {
+          resultadoDoBancoIncerto = true;
+          throw new Error("A conexão caiu antes de confirmar o resultado. Atualize a lista quando a conexão voltar antes de tentar novamente.");
+        }
+        const mesmaOperacao = estado?.status === statusFinal
+          && estado?.registrado_por === usuario
+          && !!estado?.tentativa_em
+          && Math.abs(Date.parse(estado.tentativa_em) - Date.parse(tentativaEm)) < 2000;
+        if (mesmaOperacao) {
+          registroConcluido = true;
+        } else {
+          throw erroAtualizacao || new Error("O pacote já foi alterado em outro aparelho ou não está mais pendente. Atualize a lista antes de tentar novamente.");
+        }
+      } else {
+        registroConcluido = true;
+      }
+
+      fotos.forEach((f) => { if (f.file) URL.revokeObjectURL(f.url); });
       setPacote(null); setFotos([]); setNome(""); setDestinatario(""); setEndereco(""); setParadaRota(""); setObservacao(""); setTextoOCR("");
       await atualizar(lista.id);
     } catch (e: any) {
-      if (!registroConcluido) {
-        if (fotosInseridas.length) await db.from("fotos_entrega").delete().in("id", fotosInseridas);
-        if (arquivosEnviados.length) await db.storage.from("fotos-entregas").remove(arquivosEnviados);
+      if (!registroConcluido && !resultadoDoBancoIncerto) {
+        if (fotosInseridas.length) {
+          const { error: erroLimpezaBanco } = await db.from("fotos_entrega").delete().in("id", fotosInseridas);
+          if (erroLimpezaBanco) console.error("Falha ao limpar metadados de fotos após erro:", erroLimpezaBanco.message);
+        }
+        if (arquivosEnviados.length) {
+          const { error: erroLimpezaStorage } = await db.storage.from("fotos-entregas").remove(arquivosEnviados);
+          if (erroLimpezaStorage) console.error("Falha ao limpar arquivos após erro:", erroLimpezaStorage.message);
+        }
       }
       setErro(registroConcluido
-        ? "Registro salvo, mas a tela não atualizou. Atualize a página. Motivo: " + e.message
-        : "Não foi possível salvar o registro: " + e.message);
-    } finally { setSalvando(false); }
+        ? "A entrega foi salva no servidor, mas a lista não atualizou. Atualize a lista. Motivo: " + (e?.message || "erro desconhecido")
+        : resultadoDoBancoIncerto
+          ? "Não foi possível confirmar se a entrega foi salva. Atualize a lista quando a conexão voltar antes de tentar novamente. " + (e?.message || "")
+          : "Não foi possível salvar a entrega: " + (e?.message || "erro desconhecido") + ". Verifique a conexão e tente novamente.");
+    } finally {
+      salvandoRegistroRef.current = false;
+      setSalvando(false);
+    }
   };
 
   const confirmar = async () => {
