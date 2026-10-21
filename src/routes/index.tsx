@@ -410,7 +410,7 @@ function Index() {
           const script = document.createElement("script");
           script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
           script.async = true;
-          script.dataset.ocrTesseract = "true";
+          script.dataset["ocrTesseract"] = "true";
           script.onload = () => resolve();
           script.onerror = () => reject(new Error("Falha ao carregar OCR"));
           document.head.appendChild(script);
