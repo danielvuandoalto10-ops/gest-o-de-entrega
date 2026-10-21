@@ -228,7 +228,6 @@ function Index() {
   const [cameraAberta, setCameraAberta] = useState(false);
   const [fotosRascunho, setFotosRascunho] = useState<{ id: string; file: File; url: string }[]>([]);
   const [ocrProcessando, setOcrProcessando] = useState(false);
-  const [mostrarCampoEndereco, setMostrarCampoEndereco] = useState(false);
   const videoCameraRef = useRef<HTMLVideoElement | null>(null);
   const streamCameraRef = useRef<MediaStream | null>(null);
   const salvandoRegistroRef = useRef(false);
