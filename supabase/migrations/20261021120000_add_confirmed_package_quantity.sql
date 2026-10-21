@@ -1,0 +1,1 @@
+alter table public.pacotes add column if not exists quantidade_conferida integer not null default 0 check (quantidade_conferida >= 0);
