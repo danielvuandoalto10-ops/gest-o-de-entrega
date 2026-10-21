@@ -191,7 +191,8 @@ function Index() {
   const [listas, setListas] = useState<Lista[]>([]);
   const [listaId, setListaId] = useState<string | null>(null);
   const [pacote, setPacote] = useState<number | null>(null);
-  const [detalheId, setDetalheId] = useState<number | null>(null);\n  const [quantidadeConferida, setQuantidadeConferida] = useState("1");
+  const [detalheId, setDetalheId] = useState<number | null>(null);
+  const [quantidadeConferida, setQuantidadeConferida] = useState("1");
   const [aba, setAba] = useState<"pendentes" | "entregues" | "insucessos" | "conferidos">("pendentes");
   const [nome, setNome] = useState("");
   const [destinatario, setDestinatario] = useState("");
