@@ -1,0 +1,79 @@
+name: Aplicar filtro de período
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-filter:
+    if: "!contains(github.event.head_commit.message, 'Adicionar filtro por data, mês ou ano')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Alterar tela de resumo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/routes/index.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          old_state = '  const [filtroMotivo, setFiltroMotivo] = useState("");\n'
+          new_state = old_state + '''  const [filtroPeriodoTipo, setFiltroPeriodoTipo] = useState<"todos" | "data" | "mes" | "ano">("todos");\n  const [filtroPeriodoValor, setFiltroPeriodoValor] = useState("");\n'''
+          if 'filtroPeriodoTipo' not in text:
+              if old_state not in text:
+                  raise SystemExit('Não encontrei o estado do filtro.')
+              text = text.replace(old_state, new_state, 1)
+
+          old_clear = '    setFiltroCliente(""); setFiltroEndereco(""); setFiltroParada(""); setFiltroDataInicio(""); setFiltroDataFim("");\n    setFiltroEntregaInicio(""); setFiltroEntregaFim(""); setFiltroStatus(""); setFiltroMotivo(""); setMostrarResultados(false);\n'
+          new_clear = old_clear.replace('    setFiltroEntregaInicio("");', '    setFiltroPeriodoTipo("todos"); setFiltroPeriodoValor(""); setFiltroEntregaInicio("");')
+          if 'setFiltroPeriodoTipo("todos")' not in text:
+              if old_clear not in text:
+                  raise SystemExit('Não encontrei a função limparFiltros.')
+              text = text.replace(old_clear, new_clear, 1)
+
+          old_results = '  const resultadosPesquisa = useMemo(() => listas.flatMap((l) => l.pacotes.map((p) => ({ lista: l, pacote: p }))).filter(({ lista: l, pacote: p }) => {\n'
+          new_results = '''  const listasVisiveis = useMemo(() => {\n    if (filtroPeriodoTipo === "todos" || !filtroPeriodoValor) return listas;\n    return listas.filter((l) => {\n      const data = l.data?.slice(0, 10) ?? "";\n      if (filtroPeriodoTipo === "data") return data === filtroPeriodoValor;\n      if (filtroPeriodoTipo === "mes") return data.slice(0, 7) === filtroPeriodoValor;\n      if (filtroPeriodoTipo === "ano") return data.slice(0, 4) === filtroPeriodoValor;\n      return true;\n    });\n  }, [listas, filtroPeriodoTipo, filtroPeriodoValor]);\n\n''' + old_results
+          if 'const listasVisiveis = useMemo' not in text:
+              if old_results not in text:
+                  raise SystemExit('Não encontrei o cálculo de resultados.')
+              text = text.replace(old_results, new_results, 1)
+
+          old_header = '<p className="text-sm text-slate-400">Selecione uma data para ver os pacotes.</p>'
+          new_header = old_header + '''<div className="mt-3 flex flex-wrap items-center gap-2">\n              <span className="text-xs font-medium text-slate-400">Filtrar por período:</span>\n              <select value={filtroPeriodoTipo} onChange={(e) => { setFiltroPeriodoTipo(e.target.value as "todos" | "data" | "mes" | "ano"); setFiltroPeriodoValor(""); }} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white">\n                <option value="todos">Todos</option>\n                <option value="data">Data</option>\n                <option value="mes">Mês</option>\n                <option value="ano">Ano</option>\n              </select>\n              {filtroPeriodoTipo === "data" && <input aria-label="Selecionar data" type="date" value={filtroPeriodoValor} onChange={(e) => setFiltroPeriodoValor(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />}\n              {filtroPeriodoTipo === "mes" && <input aria-label="Selecionar mês" type="month" value={filtroPeriodoValor} onChange={(e) => setFiltroPeriodoValor(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />}\n              {filtroPeriodoTipo === "ano" && <input aria-label="Selecionar ano" type="number" min="2000" max="2100" inputMode="numeric" placeholder="2026" value={filtroPeriodoValor} onChange={(e) => setFiltroPeriodoValor(e.target.value.slice(0, 4))} className="w-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />}\n              {filtroPeriodoTipo !== "todos" && filtroPeriodoValor && <button onClick={() => setFiltroPeriodoValor("")} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300">Limpar</button>}\n            </div>'''
+          if 'Filtrar por período:' not in text:
+              if old_header not in text:
+                  raise SystemExit('Não encontrei o texto de seleção de data.')
+              text = text.replace(old_header, new_header, 1)
+
+          marker = '{listas.map((l) => { const entreguesDia = l.pacotes.filter((p) => ehEntregue(p.status)).length;'
+          replacement = '{listasVisiveis.map((l) => { const entreguesDia = l.pacotes.filter((p) => ehEntregue(p.status)).length;'
+          if 'listasVisiveis.map((l)' not in text:
+              if marker not in text:
+                  raise SystemExit('Não encontrei a grade de listas.')
+              text = text.replace(marker, replacement, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verificar alteração
+        run: |
+          grep -q 'Filtrar por período:' src/routes/index.tsx
+          grep -q 'const listasVisiveis' src/routes/index.tsx
+
+      - name: Commitar alteração e remover este workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/index.tsx .github/workflows/add-period-filter.yml
+          git rm .github/workflows/add-period-filter.yml
+          git commit -m 'Adicionar filtro por data, mês ou ano'
+          git push
