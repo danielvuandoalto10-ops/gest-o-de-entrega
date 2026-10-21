@@ -216,3 +216,60 @@ svg {
     max-width: 100%;
   }
 }
+
+
+/* Modos de aparência independentes: preto no escuro e fundo claro no claro. */
+.user-themed.dark-mode,
+main.bg-slate-950.user-themed.dark-mode {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+.user-themed.dark-mode .user-theme-header,
+.user-themed.dark-mode .user-theme-header.bg-slate-900 {
+  background: #000000 !important;
+  border-bottom-color: #262626 !important;
+}
+.user-themed.light-mode,
+main.bg-slate-950.user-themed.light-mode {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+.user-themed.light-mode .user-theme-header,
+.user-themed.light-mode .user-theme-header.bg-slate-900 {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-bottom-color: #e5e7eb !important;
+}
+.user-themed.light-mode .bg-slate-950,
+.user-themed.light-mode .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+.user-themed.light-mode .bg-slate-800 {
+  background-color: #f3f4f6 !important;
+}
+.user-themed.light-mode .bg-slate-700 {
+  background-color: #e5e7eb !important;
+}
+.user-themed.light-mode .text-white,
+.user-themed.light-mode .text-slate-100,
+.user-themed.light-mode .text-slate-200,
+.user-themed.light-mode .text-slate-300,
+.user-themed.light-mode .text-slate-400 {
+  color: #1f2937 !important;
+}
+.user-themed.light-mode .border-slate-700,
+.user-themed.light-mode .border-slate-800,
+.user-themed.light-mode .border-slate-600 {
+  border-color: #d1d5db !important;
+}
+.user-themed.light-mode input,
+.user-themed.light-mode select,
+.user-themed.light-mode textarea {
+  color: #111827 !important;
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+}
+.user-themed.light-mode .bg-emerald-600 {
+  background-color: var(--user-accent) !important;
+  color: var(--user-accent-foreground) !important;
+}
