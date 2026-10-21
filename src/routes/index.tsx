@@ -662,7 +662,9 @@ function Index() {
     if (!db || !lista || !detalhe?.id || detalhe.status !== "registrado") return;
     setSalvando(true);
     try {
-      const quantidade = Number(quantidadeConferida);\n      if (!Number.isInteger(quantidade) || quantidade < 1) { setErro("Informe quantos pacotes foram entregues nesta parada (mínimo 1)."); setSalvando(false); return; }\n      const { error } = await db.from("pacotes").update({ status: "conferido", conferido_em: new Date().toISOString(), quantidade_conferida: quantidade }).eq("id", detalhe.id).eq("status", "registrado");
+      const quantidade = Number(quantidadeConferida);
+      if (!Number.isInteger(quantidade) || quantidade < 1) { setErro("Informe quantos pacotes foram entregues nesta parada (mínimo 1)."); setSalvando(false); return; }
+      const { error } = await db.from("pacotes").update({ status: "conferido", conferido_em: new Date().toISOString(), quantidade_conferida: quantidade }).eq("id", detalhe.id).eq("status", "registrado");
       if (error) throw error;
       await atualizar(lista.id); setDetalheId(null); setQuantidadeConferida("1"); setAba("conferidos");
     } catch (e: any) { setErro("Não foi possível confirmar: " + e.message); }
