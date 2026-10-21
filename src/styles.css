@@ -141,7 +141,13 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background: #020617;
+  background: #0b2e59;
+}
+
+/* Fundo azul do aplicativo Gestão de Entregas. */
+main.bg-slate-950,
+.user-themed {
+  background-color: #0b2e59 !important;
 }
 
 .user-theme-header {
