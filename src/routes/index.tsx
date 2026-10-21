@@ -70,7 +70,11 @@ async function carregarListas(db: ReturnType<typeof criarSupabaseParaUsuario>, u
       if (!erroAssinatura) {
         const pares: [string, string][] = [];
         for (const assinada of assinadas ?? []) {
-          if (assinada.path && assinada.signedUrl) pares.push([assinada.path, assinada.signedUrl]);
+          if (!assinada.path || !assinada.signedUrl) continue;
+          // O Storage pode devolver o caminho com o nome do bucket e uma barra inicial.
+          // Normalizamos para comparar com storage_path, que guarda apenas o caminho interno.
+          const caminho = assinada.path.replace(/^\\/?fotos-entregas\\//, "").replace(/^\\/+/, "");
+          pares.push([caminho, assinada.signedUrl]);
         }
         urlsPorCaminho = new Map(pares);
       }
