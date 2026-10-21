@@ -738,6 +738,7 @@ function Index() {
       if (!Number.isInteger(quantidade) || quantidade < 1) { setErro("Informe quantos pacotes foram entregues nesta parada (mínimo 1)."); setSalvando(false); return; }
       const { error } = await db.from("pacotes").update({ status: "conferido", conferido_em: new Date().toISOString(), quantidade_conferida: quantidade }).eq("id", detalhe.id).eq("status", "registrado");
       if (error) throw error;
+      setErro("");
       await atualizar(lista.id); setDetalheId(null); setQuantidadeConferida("1"); setAba("conferidos");
     } catch (e: any) { setErro("Não foi possível confirmar: " + e.message); }
     finally { setSalvando(false); }
@@ -835,7 +836,7 @@ function Index() {
   return <main data-user-theme={usuario} style={{ "--user-accent": corAtiva, "--user-accent-foreground": corTextoAtiva, "--user-font": fonteAtiva } as React.CSSProperties} className={"user-themed min-h-screen " + (modoAparencia === "claro" ? "light-mode bg-white text-slate-900" : "dark-mode bg-black text-white")}>
     <header className="user-theme-header border-b border-slate-800 bg-slate-900 px-4 py-3"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><div><h1 className="text-xl font-bold">Gestão de Entregas</h1><p className="text-sm text-slate-300">Painel de {usuario}</p></div><div className="flex items-center gap-2"><button aria-label="Personalizar aparência" title="Personalizar aparência" onClick={() => { setCorPersonalizada(corAtiva); setConfiguracaoVisualAberta(true); }} className="rounded-lg border border-slate-600 bg-slate-950/40 px-3 py-2 text-sm transition hover:bg-slate-800">🎨 <span className="hidden sm:inline">Aparência</span></button><button onClick={() => { limparFiltros(); setConfiguracaoVisualAberta(false); setUsuario(null); setListas([]); setListaId(null); setPacote(null); setDetalheId(null); setFiltroAberto(false); setMostrarResultados(false); setErro(""); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Trocar usuário</button></div></div></header>
     <div className="mx-auto max-w-6xl px-4 py-5">
-      {erro && <div className="mb-4 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200">{erro}</div>}
+      {erro && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-red-900 bg-red-950/60 p-3 text-sm text-red-200"><span>{erro}</span><button type="button" onClick={() => setErro("")} aria-label="Fechar mensagem de erro" className="shrink-0 rounded-lg px-2 py-1 font-semibold hover:bg-red-900/60">Fechar ✕</button></div>}
       {carregando && <p className="mb-4 text-sm text-slate-400">Carregando registros de {usuario}...</p>}
       {usuario && <p role="status" aria-live="polite" className={"mb-4 text-xs " + (syncStatus === "online" ? "text-emerald-400" : syncStatus === "offline" ? "text-amber-300" : "text-slate-400")}>{syncStatus === "online" ? "● Sincronização em tempo real conectada" : syncStatus === "offline" ? "● Conexão em tempo real indisponível; alterações podem demorar para aparecer" : "● Conectando à sincronização em tempo real..."}</p>}
       {!carregando && !lista && !mostrarResultados && <section>
