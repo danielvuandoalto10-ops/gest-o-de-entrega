@@ -47,7 +47,12 @@ async function carregarListas(db: ReturnType<typeof criarSupabaseParaUsuario>, u
   if (error) throw error;
   if (!rows?.length) return [];
   const ids = rows.map((r) => r.id);
-  const { data: ps, error: pe } = await db.from("pacotes").select("id,lista_id,numero,nome_recebedor,nome_destinatario,endereco,parada_rota,data_entrega,hora_entrega,status,registrado_por,conferido_em,quantidade_conferida,motivo_insucesso,observacao_insucesso,tentativa_em").in("lista_id", ids).order("numero");
+  let { data: ps, error: pe } = await db.from("pacotes").select("id,lista_id,numero,nome_recebedor,nome_destinatario,endereco,parada_rota,data_entrega,hora_entrega,status,registrado_por,conferido_em,quantidade_conferida,motivo_insucesso,observacao_insucesso,tentativa_em").in("lista_id", ids).order("numero");
+  // Mantém o app carregando caso a migration ainda não tenha sido aplicada no Supabase.
+  if (pe && /quantidade_conferida|column/i.test(pe.message || "")) {
+    const fallback = await db.from("pacotes").select("id,lista_id,numero,nome_recebedor,nome_destinatario,endereco,parada_rota,data_entrega,hora_entrega,status,registrado_por,conferido_em,motivo_insucesso,observacao_insucesso,tentativa_em").in("lista_id", ids).order("numero");
+    ps = fallback.data as typeof ps; pe = fallback.error;
+  }
   if (pe) throw pe;
   const pids = (ps ?? []).map((p) => p.id);
   const { data: fs, error: fe } = pids.length ? await db.from("fotos_entrega").select("id,pacote_id,storage_path,captured_at").in("pacote_id", pids).order("captured_at") : { data: [], error: null };
