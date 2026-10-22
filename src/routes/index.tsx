@@ -841,7 +841,7 @@ function Index() {
   };
 
   if (!usuario) {
-    const corInicial = modoAparencia === "claro" ? "#2563eb" : "#10b981";
+    const corInicial = modoAparencia === "claro" ? coresClarasUsuario.Daniel : coresUsuario.Daniel;
     const corTextoInicial = luminanciaHex(corInicial) > 0.42 ? "#020617" : "#ffffff";
     return <main style={{ "--user-accent": corInicial, "--user-accent-foreground": corTextoInicial } as React.CSSProperties} className={"user-themed min-h-screen flex items-center justify-center p-5 " + (modoAparencia === "claro" ? "light-mode bg-white text-slate-900" : "dark-mode bg-black text-white")}>
     <section className="w-full max-w-md">
@@ -859,6 +859,7 @@ function Index() {
     </section>
     {fotoPerfilPendente && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"><section role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 text-center"><h2 className="text-lg font-bold">Confirmar foto de {fotoPerfilPendente.usuario}</h2><img src={fotoPerfilPendente.previa} alt="Prévia da nova foto de perfil" className="mx-auto my-4 h-32 w-32 rounded-full object-cover" /><p className="text-sm text-slate-300">A foto atual só será substituída depois da confirmação.</p>{erroPersonalizacao && <p role="alert" className="mt-3 text-sm text-red-300">{erroPersonalizacao}</p>}<div className="mt-5 flex gap-3"><button disabled={salvandoFotoPerfil} onClick={() => { URL.revokeObjectURL(fotoPerfilPendente.previa); setFotoPerfilPendente(null); setErroPersonalizacao(""); }} className="flex-1 rounded-xl border border-slate-700 p-3">Cancelar</button><button disabled={salvandoFotoPerfil} onClick={confirmarFotoPerfil} className="flex-1 rounded-xl bg-emerald-600 p-3 font-semibold disabled:opacity-50">{salvandoFotoPerfil ? "Salvando..." : "Confirmar foto"}</button></div></section></div>}
   </main>;
+  }
 
   const corAtiva = modoAparencia === "claro" ? coresClarasUsuario[usuario] : coresUsuario[usuario];
   const alterarCorAtiva = (cor: string) => {
