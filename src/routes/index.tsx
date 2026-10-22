@@ -181,24 +181,26 @@ function Index() {
   }, []);
 
   useEffect(() => {
-    if (!usuario || !db) return;
     let ativo = true;
-    const carregarPreferenciasRemotas = async () => {
+    const carregarAparenciaCompartilhada = async () => {
       try {
-        const { data, error } = await db.storage.from("fotos-entregas").download(usuario + "/profile/preferences.json");
+        // Usa um caminho global único para que os três aparelhos leiam a mesma aparência.
+        const clienteAparencia = criarSupabaseParaUsuario("Daniel");
+        const { data, error } = await clienteAparencia.storage.from("fotos-entregas").download("Daniel/profile/appearance-global.json");
         if (error || !data) return;
         const config = JSON.parse(await data.text());
-        const fontesValidas = ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"];
         if (!ativo) return;
-        if (/^#[0-9a-fA-F]{6}$/.test(config?.cor ?? "")) setCoresUsuario((v) => ({ ...v, [usuario]: config.cor }));
-        if (fontesValidas.includes(config?.fonte)) setFontesUsuario((v) => ({ ...v, [usuario]: config.fonte }));
+        if (config?.modoAparencia === "claro" || config?.modoAparencia === "escuro") setModoAparencia(config.modoAparencia);
+        if (/^#[0-9a-fA-F]{6}$/.test(config?.corEscura ?? "")) setCoresUsuario({ Daniel: config.corEscura, Rafael: config.corEscura });
+        if (/^#[0-9a-fA-F]{6}$/.test(config?.corClara ?? "")) setCoresClarasUsuario({ Daniel: config.corClara, Rafael: config.corClara });
+        if (typeof config?.fonte === "string" && ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"].includes(config.fonte)) setFontesUsuario({ Daniel: config.fonte, Rafael: config.fonte });
       } catch {
-        // Se ainda não existe preferência remota, mantém o padrão/cache local sem alterar dados.
+        // Sem preferência global salva, mantém os valores locais padrão.
       }
     };
-    void carregarPreferenciasRemotas();
+    void carregarAparenciaCompartilhada();
     return () => { ativo = false; };
-  }, [usuario, db]);
+  }, []);
 
   useEffect(() => {
     const fonte = usuario ? fontesUsuario[usuario] : null;
@@ -773,9 +775,15 @@ function Index() {
     setSalvandoPreferencias(true);
     setErroPersonalizacao("");
     try {
-      const configuracao = { cor: coresUsuario[usuario], fonte: fontesUsuario[usuario] };
-      const { error } = await db.storage.from("fotos-entregas").upload(
-        usuario + "/profile/preferences.json",
+      const clienteAparencia = criarSupabaseParaUsuario("Daniel");
+      const configuracao = {
+        modoAparencia,
+        corEscura: coresUsuario[usuario],
+        corClara: coresClarasUsuario[usuario],
+        fonte: fontesUsuario[usuario],
+      };
+      const { error } = await clienteAparencia.storage.from("fotos-entregas").upload(
+        "Daniel/profile/appearance-global.json",
         new Blob([JSON.stringify(configuracao)], { type: "application/json" }),
         { contentType: "application/json", upsert: true },
       );
@@ -832,15 +840,18 @@ function Index() {
     setFiltroEntregaInicio(""); setFiltroEntregaFim(""); setFiltroStatus(""); setFiltroMotivo(""); setMostrarResultados(false);
   };
 
-  if (!usuario) return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-5">
+  if (!usuario) {
+    const corInicial = modoAparencia === "claro" ? "#2563eb" : "#10b981";
+    const corTextoInicial = luminanciaHex(corInicial) > 0.42 ? "#020617" : "#ffffff";
+    return <main style={{ "--user-accent": corInicial, "--user-accent-foreground": corTextoInicial } as React.CSSProperties} className={"user-themed min-h-screen flex items-center justify-center p-5 " + (modoAparencia === "claro" ? "light-mode bg-white text-slate-900" : "dark-mode bg-black text-white")}>
     <section className="w-full max-w-md">
-      <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">✓</div><h1 className="text-2xl font-bold">Gestão de Entregas</h1><p className="mt-2 text-sm text-slate-400">Selecione seu usuário para continuar</p></div>
-      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <div key={u} className="rounded-2xl border border-slate-700 bg-slate-900 p-4 text-center">
-        <button onClick={() => { limparFiltros(); setUsuario(u); }} className="w-full rounded-xl p-2 text-lg font-semibold transition hover:bg-slate-800">
-          {fotosPerfil[u] ? <img src={fotosPerfil[u]!} alt={"Foto de " + u} className="mx-auto mb-3 h-20 w-20 rounded-full border-2 border-slate-600 object-cover" /> : <span className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full border-2 border-slate-600 bg-slate-800 text-2xl">{u.slice(0,1)}</span>}
-          {u}<span className="mt-2 block text-xs font-normal text-slate-400">Acessar painel →</span>
+      <div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl text-2xl" style={{ backgroundColor: "var(--user-accent)", color: "var(--user-accent-foreground)" }}>✓</div><h1 className="text-2xl font-bold">Gestão de Entregas</h1><p className={"mt-2 text-sm " + (modoAparencia === "claro" ? "text-slate-600" : "text-slate-400")}>Selecione seu usuário para continuar</p><div className="mt-4 flex justify-center gap-2"><span className={"rounded-full px-3 py-1 text-xs " + (modoAparencia === "claro" ? "bg-slate-100 text-slate-700" : "bg-slate-800 text-slate-200")}>{modoAparencia === "claro" ? "☀️ Modo claro" : "🌙 Modo escuro"}</span></div></div>
+      <div className="grid gap-3 sm:grid-cols-2">{(["Daniel", "Rafael"] as Usuario[]).map((u) => <div key={u} className={"rounded-2xl border p-4 text-center " + (modoAparencia === "claro" ? "border-slate-200 bg-slate-50" : "border-slate-700 bg-slate-900")}>
+        <button onClick={() => { limparFiltros(); setUsuario(u); }} className="w-full rounded-xl p-2 text-lg font-semibold transition" style={{ color: "var(--user-accent)" }}>
+          {fotosPerfil[u] ? <img src={fotosPerfil[u]!} alt={"Foto de " + u} className="mx-auto mb-3 h-20 w-20 rounded-full border-2 border-slate-600 object-cover" /> : <span className={"mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full border-2 text-2xl " + (modoAparencia === "claro" ? "border-slate-300 bg-white" : "border-slate-600 bg-slate-800") }>{u.slice(0,1)}</span>}
+          {u}<span className={"mt-2 block text-xs font-normal " + (modoAparencia === "claro" ? "text-slate-600" : "text-slate-400")}>Acessar painel →</span>
         </button>
-        <label className="mt-2 inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">Escolher foto
+        <label className={"mt-2 inline-flex cursor-pointer items-center justify-center rounded-lg border px-3 py-2 text-xs " + (modoAparencia === "claro" ? "border-slate-300 text-slate-700 hover:bg-slate-100" : "border-slate-700 text-slate-300 hover:bg-slate-800")}>Escolher foto
           <input type="file" accept="image/*" className="hidden" onChange={(e) => { selecionarFotoPerfil(u, e.target.files?.[0]); e.currentTarget.value = ""; }} />
         </label>
       </div>)}</div>
