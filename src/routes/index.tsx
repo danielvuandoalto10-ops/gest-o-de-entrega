@@ -894,6 +894,34 @@ function Index() {
   const alterarCorAtiva = (cor: string) => {
     if (modoAparencia === "claro") setCoresClarasUsuario((v) => ({ ...v, [usuario]: cor }));
     else setCoresUsuario((v) => ({ ...v, [usuario]: cor }));
+
+    // Salva imediatamente no servidor, sem exigir que a pessoa aperte
+    // "Salvar preferências". Os outros aparelhos consultam o mesmo arquivo.
+    if (!usuario || !navigator.onLine) {
+      setErroPersonalizacao("A cor foi aplicada neste aparelho, mas a sincronização precisa de internet.");
+      return;
+    }
+    setErroPersonalizacao("");
+    const configuracao = {
+      modoAparencia,
+      corEscura: cor,
+      corClara: cor,
+      fonte: fontesUsuario[usuario],
+      atualizadoEm: new Date().toISOString(),
+    };
+    void (async () => {
+      try {
+        const clienteAparencia = criarSupabaseParaUsuario("Daniel");
+        const { error } = await clienteAparencia.storage.from("fotos-entregas").upload(
+          "Daniel/profile/appearance-global.json",
+          new Blob([JSON.stringify(configuracao)], { type: "application/json" }),
+          { contentType: "application/json", upsert: true },
+        );
+        if (error) throw error;
+      } catch (e: any) {
+        setErroPersonalizacao("A cor mudou neste aparelho, mas não sincronizou: " + (e?.message || "erro desconhecido"));
+      }
+    })();
   };
   const corTextoAtiva = luminanciaHex(corAtiva) > 0.42 ? "#020617" : "#ffffff";
   const fonteAtiva = fontesUsuario[usuario];
