@@ -801,10 +801,13 @@ function Index() {
     setErroPersonalizacao("");
     try {
       const clienteAparencia = criarSupabaseParaUsuario("Daniel");
+      // A cor escolhida é global: todos os aparelhos e os dois modos de aparência
+      // recebem a mesma cor de destaque, em vez de manter rosa no modo escuro
+      // e uma cor antiga (por exemplo, roxo) no modo claro.
       const configuracao = {
         modoAparencia,
-        corEscura: coresUsuario[usuario],
-        corClara: coresClarasUsuario[usuario],
+        corEscura: corAtiva,
+        corClara: corAtiva,
         fonte: fontesUsuario[usuario],
         atualizadoEm: new Date().toISOString(),
       };
