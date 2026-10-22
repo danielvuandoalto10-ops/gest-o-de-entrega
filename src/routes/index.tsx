@@ -814,7 +814,7 @@ function Index() {
       const { error } = await clienteAparencia.storage.from("fotos-entregas").upload(
         "Daniel/profile/appearance-global.json",
         new Blob([JSON.stringify(configuracao)], { type: "application/json" }),
-        { contentType: "application/json", upsert: true },
+        { contentType: "application/json", cacheControl: "0", upsert: true },
       );
       if (error) throw error;
       setConfiguracaoVisualAberta(false);
@@ -915,7 +915,7 @@ function Index() {
         const { error } = await clienteAparencia.storage.from("fotos-entregas").upload(
           "Daniel/profile/appearance-global.json",
           new Blob([JSON.stringify(configuracao)], { type: "application/json" }),
-          { contentType: "application/json", upsert: true },
+          { contentType: "application/json", cacheControl: "0", upsert: true },
         );
         if (error) throw error;
       } catch (e: any) {
