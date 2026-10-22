@@ -395,12 +395,30 @@ function Index() {
       .on("postgres_changes", { event: "*", schema: "public", table: "fotos_entrega" }, agendarAtualizacao)
       .subscribe((status) => {
         if (!ativo) return;
-        if (status === "SUBSCRIBED") setSyncStatus("online");
-        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setSyncStatus("offline");
-        else setSyncStatus("conectando");
+        if (status === "SUBSCRIBED") {
+          setSyncStatus("online");
+          agendarAtualizacao();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setSyncStatus("offline");
+        } else {
+          setSyncStatus("conectando");
+        }
       });
+
+    // Fallback: confere o banco periodicamente caso um evento Realtime se perca.
+    // Isso mantém os painéis próximos do tempo real mesmo quando o canal não entrega um evento.
+    const intervaloVerificacao = window.setInterval(() => {
+      if (document.visibilityState === "visible") void atualizarAoReceberEvento();
+    }, 3000);
+    const aoVoltarParaTela = () => {
+      if (document.visibilityState === "visible") void atualizarAoReceberEvento();
+    };
+    document.addEventListener("visibilitychange", aoVoltarParaTela);
+
     return () => {
       ativo = false;
+      window.clearInterval(intervaloVerificacao);
+      document.removeEventListener("visibilitychange", aoVoltarParaTela);
       if (temporizador !== undefined) window.clearTimeout(temporizador);
       void db.removeChannel(canal);
     };
