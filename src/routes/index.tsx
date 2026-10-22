@@ -140,24 +140,44 @@ function Index() {
   const [erroPersonalizacao, setErroPersonalizacao] = useState("");
 
   useEffect(() => {
-    try {
-      const salvas = window.localStorage.getItem("baixas-sem-entrega-preferencias-visuais-v1");
-      if (salvas) {
-        const parsed = JSON.parse(salvas);
-        setCoresUsuario({
-          Daniel: /^#[0-9a-fA-F]{6}$/.test(parsed?.cores?.Daniel ?? "") ? parsed.cores.Daniel : "#10b981",
-          Rafael: /^#[0-9a-fA-F]{6}$/.test(parsed?.cores?.Rafael ?? "") ? parsed.cores.Rafael : "#3b82f6",
-        });
-        setCoresClarasUsuario({
-          Daniel: /^#[0-9a-fA-F]{6}$/.test(parsed?.coresClaras?.Daniel ?? "") ? parsed.coresClaras.Daniel : "#2563eb",
-          Rafael: /^#[0-9a-fA-F]{6}$/.test(parsed?.coresClaras?.Rafael ?? "") ? parsed.coresClaras.Rafael : "#2563eb",
-        });
-        setModoAparencia(parsed?.modoAparencia === "claro" ? "claro" : "escuro");
-        const fontesValidas = ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"];
-        setFontesUsuario({ Daniel: fontesValidas.includes(parsed?.fontes?.Daniel) ? parsed.fontes.Daniel : "Poppins", Rafael: fontesValidas.includes(parsed?.fontes?.Rafael) ? parsed.fontes.Rafael : "Poppins" });
+    let ativo = true;
+    const aplicarConfig = (config: any) => {
+      if (config?.modoAparencia === "claro" || config?.modoAparencia === "escuro") setModoAparencia(config.modoAparencia);
+      if (/^#[0-9a-fA-F]{6}$/.test(config?.corEscura ?? "")) setCoresUsuario({ Daniel: config.corEscura, Rafael: config.corEscura });
+      else if (config?.cores && typeof config.cores === "object") setCoresUsuario({
+        Daniel: /^#[0-9a-fA-F]{6}$/.test(config.cores.Daniel ?? "") ? config.cores.Daniel : "#10b981",
+        Rafael: /^#[0-9a-fA-F]{6}$/.test(config.cores.Rafael ?? "") ? config.cores.Rafael : "#3b82f6",
+      });
+      if (/^#[0-9a-fA-F]{6}$/.test(config?.corClara ?? "")) setCoresClarasUsuario({ Daniel: config.corClara, Rafael: config.corClara });
+      else if (config?.coresClaras && typeof config.coresClaras === "object") setCoresClarasUsuario({
+        Daniel: /^#[0-9a-fA-F]{6}$/.test(config.coresClaras.Daniel ?? "") ? config.coresClaras.Daniel : "#2563eb",
+        Rafael: /^#[0-9a-fA-F]{6}$/.test(config.coresClaras.Rafael ?? "") ? config.coresClaras.Rafael : "#2563eb",
+      });
+      const fontesValidas = ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"];
+      if (typeof config?.fonte === "string" && fontesValidas.includes(config.fonte)) setFontesUsuario({ Daniel: config.fonte, Rafael: config.fonte });
+      else if (config?.fontes) setFontesUsuario({ Daniel: fontesValidas.includes(config.fontes.Daniel) ? config.fontes.Daniel : "Poppins", Rafael: fontesValidas.includes(config.fontes.Rafael) ? config.fontes.Rafael : "Poppins" });
+    };
+    const carregarAparenciaCompartilhada = async () => {
+      let carregouServidor = false;
+      try {
+        const clienteAparencia = criarSupabaseParaUsuario("Daniel");
+        const { data, error } = await clienteAparencia.storage.from("fotos-entregas").download("Daniel/profile/appearance-global.json");
+        if (!error && data) {
+          const config = JSON.parse(await data.text());
+          if (ativo) { aplicarConfig(config); carregouServidor = true; }
+        }
+      } catch { /* Se não houver rede ou arquivo, usa a cópia local. */ }
+      if (!ativo) return;
+      if (!carregouServidor) {
+        try {
+          const salvas = window.localStorage.getItem("baixas-sem-entrega-preferencias-visuais-v1");
+          if (salvas) aplicarConfig(JSON.parse(salvas));
+        } catch { /* Mantém os padrões quando não existe cópia local válida. */ }
       }
-    } catch { /* Preferências visuais são opcionais; mantém as cores padrão. */ }
-    setPreferenciasCarregadas(true);
+      setPreferenciasCarregadas(true);
+    };
+    void carregarAparenciaCompartilhada();
+    return () => { ativo = false; };
   }, []);
 
   useEffect(() => {
@@ -182,25 +202,30 @@ function Index() {
 
   useEffect(() => {
     let ativo = true;
-    const carregarAparenciaCompartilhada = async () => {
+    let buscando = false;
+    const sincronizarAparencia = async () => {
+      if (buscando || !navigator.onLine || configuracaoVisualAberta || salvandoPreferencias) return;
+      buscando = true;
       try {
-        // Usa um caminho global único para que os três aparelhos leiam a mesma aparência.
         const clienteAparencia = criarSupabaseParaUsuario("Daniel");
         const { data, error } = await clienteAparencia.storage.from("fotos-entregas").download("Daniel/profile/appearance-global.json");
-        if (error || !data) return;
+        if (error || !data || !ativo) return;
         const config = JSON.parse(await data.text());
         if (!ativo) return;
         if (config?.modoAparencia === "claro" || config?.modoAparencia === "escuro") setModoAparencia(config.modoAparencia);
         if (/^#[0-9a-fA-F]{6}$/.test(config?.corEscura ?? "")) setCoresUsuario({ Daniel: config.corEscura, Rafael: config.corEscura });
         if (/^#[0-9a-fA-F]{6}$/.test(config?.corClara ?? "")) setCoresClarasUsuario({ Daniel: config.corClara, Rafael: config.corClara });
         if (typeof config?.fonte === "string" && ["Poppins", "Inter", "Roboto", "Nunito Sans", "Lato", "Open Sans"].includes(config.fonte)) setFontesUsuario({ Daniel: config.fonte, Rafael: config.fonte });
-      } catch {
-        // Sem preferência global salva, mantém os valores locais padrão.
-      }
+      } catch { /* Uma falha temporária de rede não deve travar o painel. */ }
+      finally { buscando = false; }
     };
-    void carregarAparenciaCompartilhada();
-    return () => { ativo = false; };
-  }, []);
+    const aoFocar = () => { void sincronizarAparencia(); };
+    void sincronizarAparencia();
+    const intervalo = window.setInterval(() => { void sincronizarAparencia(); }, 15000);
+    window.addEventListener("focus", aoFocar);
+    window.addEventListener("online", aoFocar);
+    return () => { ativo = false; window.clearInterval(intervalo); window.removeEventListener("focus", aoFocar); window.removeEventListener("online", aoFocar); };
+  }, [configuracaoVisualAberta, salvandoPreferencias]);
 
   useEffect(() => {
     const fonte = usuario ? fontesUsuario[usuario] : null;
@@ -781,6 +806,7 @@ function Index() {
         corEscura: coresUsuario[usuario],
         corClara: coresClarasUsuario[usuario],
         fonte: fontesUsuario[usuario],
+        atualizadoEm: new Date().toISOString(),
       };
       const { error } = await clienteAparencia.storage.from("fotos-entregas").upload(
         "Daniel/profile/appearance-global.json",
