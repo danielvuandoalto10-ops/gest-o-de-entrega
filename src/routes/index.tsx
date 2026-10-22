@@ -242,6 +242,15 @@ function Index() {
   const [dataLista, setDataLista] = useState(agora().data);
   const [qtd, setQtd] = useState("");
   const [zoom, setZoom] = useState<{ fotos: Foto[]; i: number } | null>(null);
+
+  useEffect(() => {
+    if (!zoom) return;
+    const fecharComEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setZoom(null);
+    };
+    window.addEventListener("keydown", fecharComEscape);
+    return () => window.removeEventListener("keydown", fecharComEscape);
+  }, [zoom]);
   const [filtroAberto, setFiltroAberto] = useState(false);
   const [mostrarResultados, setMostrarResultados] = useState(false);
   const [filtroCliente, setFiltroCliente] = useState("");
